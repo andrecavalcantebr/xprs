@@ -1,9 +1,18 @@
 # ESPECIFICAÇÃO TÉCNICA: COMPILADOR DE EXPRESSÕES EM RUST
 
+## [0] CONTINUIDADE ENTRE SESSÕES
+- **Antes de qualquer outra coisa, leia @./ESTADO_DO_PROJETO.md.** Ele diz em que fase o projeto
+  está agora e qual é a próxima ação concreta — este `AGENTS.md` é o processo fixo a seguir, mas
+  não muda para refletir progresso; `ESTADO_DO_PROJETO.md` é o estado atual, e deve ser mantido
+  atualizado a cada etapa concluída.
+
 ## [1] ESCOPO DA LINGUAGEM
 - Tipo: Linguagem baseada estritamente em expressões.
 - Arquitetura: Lexer -> Parser (AST) -> Codegen (Geração de bytecode para uma pilha virtual simples ou avaliação direta).
-- A especificação detalhada, com a gramática em EBNF, está em @./xpr-spec.md
+- A especificação detalhada, com a gramática em EBNF, está em @./xpr-specs.md (ver
+  @./ESTADO_DO_PROJETO.md para como essa arquitetura resumida acima se traduz nas decisões reais
+  já tomadas — por exemplo, Codegen aqui significa gerar Rust e compilar com `rustc`/`cargo`, não
+  bytecode).
 
 ## [2] DIRETRIZES DE IMPLEMENTAÇÃO E FLUXO DE TRABALHO
 Você deve seguir estritamente o fluxo sequencial abaixo para cada etapa (Lexer, Parser, Codegen).
