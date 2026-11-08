@@ -1,8 +1,7 @@
 # Plano — Etapa Lexer
 
-Fonte normativa: `xpr-specs.md`, Seção 3 (produções marcadas "detectado pelo analisador léxico")
-e Seção 7 (posições em codepoints). Ver nota de arquitetura em `RELATORIO_PROGRESSO.md` (a criar)
-sobre a divergência entre `especifica_o_xpr.md` e `xpr-specs.md`.
+Fonte normativa: `xpr-specs.md` (único documento de especificação do projeto), Seção 3
+(produções marcadas "detectado pelo analisador léxico") e Seção 7 (posições em codepoints).
 
 ## Objetivo
 
