@@ -21,9 +21,9 @@ Subetapas:
 * **B — Sistema de módulos** (import, aliases, nomes privados, busca de caminho, ciclos)
 * **C — Inferência e checagem de tipos**
 * **D — Genéricos e especialização**
-* **E — Catálogo de diagnósticos** (`xpr_diag.def`)
-* **F — Biblioteca de runtime em C** (`xprt.h`/`.c`)
-* **G — Emissão de C e driver de build** (`src/xpr.h`, CLI `xprc`)
+* **E — Catálogo de diagnósticos** (`src/diag/catalog.rs`, fonte única em Rust)
+* **F — Biblioteca de runtime em C** (`xprt.h`/`.c`, gerado/acompanhante do executável)
+* **G — Emissão de C e driver de build** (CLI `xprc`)
 
 As subetapas **E** e **F** podem começar em paralelo com **A**-**D** (não dependem de tipos
 resolvidos), mas **G** depende de A, B, C, D e E estarem concluídas, e o runtime (F) precisa estar
@@ -127,24 +127,41 @@ Seção 4.6 (`x` em blocos aninhados), e o exemplo de `helper`/`f` com captura c
 * Saída desta subetapa: tabela de instâncias concretas (nome genérico + tipos de argumento →
   símbolo C mangled), consumida por G.
 
-### E. Catálogo de diagnósticos (`xpr_diag.def`)
+### E. Catálogo de diagnósticos
 
-Referenciado pela spec (Seção 7) mas **inexistente no repositório hoje** — precisa ser criado
-como parte desta etapa, não apenas consumido.
+A spec (Seção 7) descreve um catálogo único (`xpr_diag.def`) consumido via `#include` tanto pelo
+compilador quanto pelo runtime gerado — um idioma de macro X típico de um compilador **escrito em
+C**, que era o caso original do projeto. Como `xprc` agora é Rust, esse mecanismo de consumo não
+se aplica (o compilador não `#include`ia um `.def`), mas o **requisito** por trás dele continua
+valendo integralmente: compilador e programa compilado devem reportar exatamente os mesmos
+IDs, mensagens e dicas, a partir de uma única fonte.
 
-* Formato: arquivo de inclusão simples (sem include guards), macro `XPR_DIAG_LIST` listando cada
-  diagnóstico com: código, identificador público, severidade, modelo de mensagem, dica opcional.
-* Consumido por `src/xpr.h` (compilador) para gerar `XprErrorCode` + `XPR_DIAG_TABLE`, e por
-  `xprt.h` (runtime gerado) para a tabela de falhas do programa compilado — **ambos devem reportar
-  os mesmos IDs/mensagens/dicas** (requisito explícito da spec).
+Decisão de arquitetura: a fonte canônica passa a ser um módulo Rust, não um arquivo `.def` em C.
+
+* `src/diag/catalog.rs`: uma lista `const` (ou `macro_rules!` que a gera) de `DiagSpec { code,
+  public_id, severity, message_template, hint }`, uma entrada por diagnóstico. É a única fonte —
+  nada mais duplica código/mensagem/dica manualmente.
+* O compilador consome essa lista diretamente como dado Rust (`enum DiagCode` + tabela de busca
+  gerada a partir do mesmo `const`, sem macro de pré-processador).
+* Na subetapa G, a emissão de C **gera programaticamente**, a partir do mesmo `catalog.rs`, o
+  cabeçalho C equivalente (ex.: `xprt_diag.h`, com os `#define` de código e a tabela de
+  mensagens/dicas) que o runtime (`xprt.c`, subetapa F) inclui. Gerar o C a partir do Rust —
+  em vez de manter os dois sincronizados à mão — é o que garante o requisito "mesmos
+  IDs/mensagens/dicas" por construção, e é estritamente mais seguro que a alternativa original de
+  dois alvos (`src/xpr.h` em C e `xprt.h`) lendo o mesmo `.def`.
 * Cobrir, no mínimo, todos os nomes de erro citados ao longo da especificação: `syntax-error`,
   `undefined-identifier`, `type-mismatch`, `size-mismatch` (compilação e execução), `cannot-infer`,
   `assign-to-captured`, `assign-to-constant`, `missing-main`, `malformed-number`,
   `div-by-zero`, `overflow`, `index-out-of-range`, `invalid-number`, `invalid-size`,
   `end-of-input`, erro de ciclo de import, erro de alias duplicado, erro de limite de profundidade
   de chamada (10.000).
-* Entregável de documentação: `diretrizes-diagnosticos.md` (também referenciado e inexistente),
-  descrevendo o design de propagação/limpeza de diagnósticos no próprio compilador.
+* O documento `diretrizes-diagnosticos.md`, referenciado pela spec, descrevia propagação/limpeza
+  de diagnósticos **dentro do compilador em C** (cadeias de `goto` de limpeza, códigos de erro
+  subindo manualmente). Em Rust isso é resolvido pelo próprio idioma (`Result<T, SemaError>` + `?`
+  + `Drop`, já refletido nas assinaturas de `plano-parser.md`/`plano-codegen.md`) — não recriamos
+  esse documento. O que ainda precisa de registro (como cada erro de cada etapa mapeia para um
+  `DiagCode` do catálogo) fica anotado no `RELATORIO_PROGRESSO.md` desta subetapa, não em um
+  arquivo novo.
 
 ### F. Biblioteca de runtime em C (`xprt.h`/`.c`)
 
@@ -164,8 +181,10 @@ como parte desta etapa, não apenas consumido.
 * Limite de profundidade de chamada (10.000) e sua interação com `try`.
 * `main()` em C: constrói a lista `[string]` de `argv` (sem o nome do programa), roda `_init` na
   ordem da Seção 4.1, chama `_main`, usa o `int` retornado como status de saída (ou 0).
-* Entregável de documentação: `diretrizes-compilador-c.md` (referenciado, inexistente), incluindo
-  o esquema de nomes de função/membro de módulo em C.
+* Entregável de documentação: `diretrizes-runtime-c.md` — sucessor do `diretrizes-compilador-c.md`
+  original (que descrevia convenções do compilador-em-C; agora o compilador é Rust, então o
+  documento passa a descrever apenas o **alvo**: convenções do C gerado/runtime — representação
+  de valores, refcounting, esquema de nomes de função/membro de módulo, builtins).
 
 ### G. Emissão de C e driver de build
 
