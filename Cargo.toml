@@ -1,0 +1,10 @@
+[package]
+name = "xprc"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "xprc"
+path = "src/main.rs"
+
+[dependencies]
