@@ -1,0 +1,15 @@
+Module
+  Def soma
+    FnDef param=[a:int, b:int]
+      Block
+        Assign target=[x, [y, z]]
+          Bracket
+            Name a
+            Bracket
+              Name b
+              Name a
+        BinOp +
+          lhs: BinOp +
+            lhs: Name x
+            rhs: Name y
+          rhs: Name z

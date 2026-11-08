@@ -1,0 +1,11 @@
+Module
+  Import name=math alias=m
+  Import name=strings alias=strings
+  Def g
+    Name m.sqrt
+  Def main
+    FnDef param=x
+      Block
+        Call
+          target: Name m.sqrt
+          arg: Name x

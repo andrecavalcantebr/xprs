@@ -1,0 +1,16 @@
+1:1-3 KwFn
+1:4-7 KwIif
+1:8-11 KwFor
+1:12-15 KwTry
+1:16-22 KwImport
+1:23-26 KwAnd
+1:27-29 KwOr
+1:30-33 KwNot
+1:34-35 Ident(x)
+1:36-38 Ident(_y)
+1:39-41 Ident(z9)
+1:42-46 Ident(true)
+1:47-52 Ident(false)
+1:53-56 Ident(int)
+1:57-61 Ident(real)
+2:1-1 Eof

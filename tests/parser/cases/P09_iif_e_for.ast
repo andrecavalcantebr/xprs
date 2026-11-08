@@ -1,0 +1,24 @@
+Module
+  Def main
+    FnDef param=n
+      Block
+        Assign target=r
+          Iif
+            cond: BinOp >
+              lhs: Name n
+              rhs: IntLit 0
+            then: IntLit 1
+            else: Unary - adj=true
+              IntLit 1
+        For
+          init: Assign target=i
+            IntLit 0
+          cond: BinOp <
+            lhs: Name i
+            rhs: Name n
+          step: Assign target=i
+            BinOp +
+              lhs: Name i
+              rhs: IntLit 1
+          body: Block
+            Name r

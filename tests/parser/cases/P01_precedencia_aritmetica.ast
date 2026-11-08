@@ -1,0 +1,9 @@
+Module
+  Def r
+    BinOp -
+      lhs: BinOp +
+        lhs: IntLit 1
+        rhs: BinOp *
+          lhs: IntLit 2
+          rhs: IntLit 3
+      rhs: IntLit 4

@@ -44,6 +44,11 @@ As subetapas **E** e **F** podem começar em paralelo com **A**-**D** (não depe
 resolvidos), mas **G** depende de A, B, C, D e E estarem concluídas, e o runtime (F) precisa estar
 pronto antes que o Rust emitido por G possa ser compilado e testado de ponta a ponta.
 
+**Testes desta etapa**: ver `plano-testes-codegen.md` para o roteiro evolutivo de milestones
+executáveis (compila+roda+compara stdout/exit) e `scripts/run-codegen-milestones.sh` para o
+runner. É um documento vivo, não uma lista fechada — ao contrário dos fixtures golden-file do
+Lexer/Parser.
+
 ## Esboço de API
 
 ```rust
@@ -239,7 +244,9 @@ Cargo normal em vez de um `.a`/`.o` em C.
 
 ## Critério de conclusão da etapa
 
-Cada subetapa (A–G) com sua própria suíte verde. Critério final de ponta a ponta: um conjunto de
-programas `.x` de exemplo (extraídos literalmente dos blocos de código da especificação — fatorial
-recursivo, `try`/`fail` com `age`, closures `helper`/`f`, módulos com `import`) compilados por
-`xprc`, executados, e produzindo exatamente os valores que a especificação afirma.
+Cada subetapa (A–G) com sua própria suíte verde, **e** todos os milestones já registrados em
+`plano-testes-codegen.md` (`tests/codegen/milestones/`) passando via
+`scripts/run-codegen-milestones.sh`. Diferente do Lexer/Parser, essa suíte não é fixa — ela
+cresce a cada subetapa que introduz comportamento observável novo (ver a "Regra de evolução" no
+próprio `plano-testes-codegen.md`). Uma subetapa só está concluída quando os milestones que ela
+introduziu **e** todos os anteriores continuam verdes: não há regressão aceitável.

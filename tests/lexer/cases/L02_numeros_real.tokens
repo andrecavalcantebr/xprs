@@ -1,0 +1,7 @@
+1:1-3 RealLit(.5)
+1:4-6 RealLit(3.)
+1:7-10 RealLit(4.0)
+1:11-14 RealLit(3e0)
+1:15-22 RealLit(1.5e-10)
+1:23-27 RealLit(2E+3)
+2:1-1 Eof

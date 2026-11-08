@@ -1,0 +1,7 @@
+Module
+  Def r
+    BinOp ==
+      lhs: BinOp <
+        lhs: IntLit 1
+        rhs: IntLit 2
+      rhs: Name true

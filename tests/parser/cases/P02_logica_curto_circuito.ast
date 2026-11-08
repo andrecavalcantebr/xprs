@@ -1,0 +1,8 @@
+Module
+  Def r
+    Or
+      Name true
+      And
+        Name false
+        Not
+          Name false

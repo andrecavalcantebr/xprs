@@ -1,0 +1,9 @@
+Module
+  Def r
+    Unary - adj=true
+      Indexed
+        base: Bracket
+          IntLit 1
+          IntLit 2
+          IntLit 3
+        idx[0]: IntLit 1

@@ -1,0 +1,12 @@
+Module
+  Def r
+    Indexed
+      base: Bracket
+        Bracket
+          IntLit 1
+          IntLit 2
+        Bracket
+          IntLit 3
+          IntLit 4
+      idx[0]: IntLit 1
+      idx[1]: IntLit 0

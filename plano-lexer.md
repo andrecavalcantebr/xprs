@@ -20,10 +20,20 @@ Nenhuma crate externa. Apenas `std` (iteração de `char` sobre `&str`, que já 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
-    pub line: u32,       // 1-based
-    pub col_start: u32,  // 1-based, em codepoints
-    pub col_end: u32,    // exclusivo
+    pub line_start: u32,  // 1-based
+    pub col_start: u32,   // 1-based, em codepoints
+    pub line_end: u32,    // 1-based; igual a line_start exceto em strings multilinha
+    pub col_end: u32,     // exclusivo, na linha line_end
 }
+```
+
+**Correção de projeto:** a primeira versão deste plano tinha `Span` com um único campo `line`,
+o que não representa um token que cruza linhas — e strings **podem** cruzar linhas (Seção 3,
+`chars` aceita qualquer codepoint incluindo controle, "uma string pode abranger várias linhas").
+`line_start`/`line_end` resolvem isso; para todo token que não seja uma string multilinha,
+`line_start == line_end`.
+
+```rust
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
@@ -120,10 +130,93 @@ impl<'a> Lexer<'a> {
 
 Cada subetapa gera seu arquivo de teste próprio (`tests/lexer_numeros.rs`,
 `tests/lexer_strings.rs`, etc.) ou seções dentro de `tests/lexer_tests.rs` — a decidir pelo agente
-executor, desde que nenhum teste de uma subetapa posterior preceda a lógica que ele testa.
+executor, desde que nenhum teste de uma subetapa posterior preceda a lógica que ele testa. Além
+desses testes unitários por subetapa, a etapa inteira é fechada por uma suíte de **fixtures
+golden-file** (abaixo), que é o critério de conclusão real.
+
+## Fixtures golden-file: exemplos `.x` e seus dumps esperados
+
+Diretório `tests/lexer/cases/` (casos que devem tokenizar com sucesso) e
+`tests/lexer/cases/errors/` (casos que devem falhar com um `LexError` específico). Para cada
+`NN_nome.x` existe um arquivo-irmão:
+
+* `NN_nome.tokens` (casos de sucesso) — o dump esperado da sequência de tokens, um por linha.
+* `NN_nome.error` (casos de erro) — uma única linha com o erro esperado; `tokenize()` deve
+  retornar exatamente esse `Err` para aquele arquivo, independentemente de quantos tokens válidos
+  o precederiam (a assinatura `tokenize() -> Result<Vec<Token>, LexError>` descarta os tokens
+  parciais em caso de erro).
+
+### Formato do dump (`.tokens`, uma linha por token, nessa ordem, incluindo o `Eof` final)
+
+```
+{posição} {representação-do-TokenKind}[ adj]
+```
+
+* **Posição**: se `line_start == line_end`, `{line_start}:{col_start}-{col_end}`; senão (token
+  multilinha, só acontece em `StringLit`), `{line_start}:{col_start}-{line_end}:{col_end}`.
+* **Representação do `TokenKind`** (notação fixa, não é o `#[derive(Debug)]` literal do Rust —
+  mais compacta e desenhada para ser fácil de conferir à mão):
+  * `IntLit(<dígitos>)`, `RealLit(<texto bruto>)` — sem aspas, o texto é sempre `[0-9.eE+-]`.
+  * `StringLit(dq, <conteúdo>)` ou `StringLit(sq, <conteúdo>)` — `dq`/`sq` indica o delimitador
+    original (`"` ou `'`); `<conteúdo>` é o conteúdo **bruto** (não decodificado) formatado com o
+    escape padrão do Rust (`{:?}` de uma `&str`) só para tornar a linha do dump legível e
+    inambígua — um `\` literal no texto original aparece como `\\`; um codepoint de controle real
+    (ex.: uma nova linha dentro da string) aparece como `\n` (uma barra só). Essa é a distinção
+    importante: o lexer nunca decodifica `\n` em uma quebra de linha real — se o dump mostra `\n`
+    de barra simples, é porque havia um caractere de controle de verdade no fonte.
+  * `Ident(<nome>)` — sem aspas (identificadores são só ASCII, sem ambiguidade).
+  * Palavras-chave e operadores/pontuação: o nome do variant tal como está em `TokenKind`
+    (`KwFn`, `KwIif`, ..., `Plus`, `Minus`, ..., `LParen`, ..., `Dot`).
+  * `Eof`.
+* **Sufixo ` adj`**: aparece **somente** em tokens `Plus`/`Minus`, quando `adjacent_to_next ==
+  true`. Para todos os outros `TokenKind`s, omitido (o campo é irrelevante fora de sinais).
+
+### Formato do erro (`.error`, sempre uma única linha)
+
+```
+{posição} {VarianteDeLexErrorKind}
+```
+(mesma regra de posição acima; variantes = nomes de `LexErrorKind`).
+
+### Exemplos incluídos (seed — a suíte deve crescer, nunca encolher)
+
+| Arquivo | Cobre (subetapa) |
+| --- | --- |
+| `L01_numeros_int.x` | 2 — inteiros |
+| `L02_numeros_real.x` | 2 — reais, as 4 formas da gramática |
+| `L03_identificadores_e_palavras_chave.x` | 4 — identificadores vs. as 8 keywords; `true`/`false`/`int`/`real` NÃO são keywords |
+| `L04_operadores_e_pontuacao.x` | 5 — todos os operadores/pontuação de um token |
+| `L05_dot_ambiguo.x` | 5 — `.` como `Dot` entre identificadores vs. início de `RealLit` |
+| `L06_strings.x` | 3 — aspas simples/duplas, escape bruto não decodificado, string multilinha |
+| `L07_comentarios.x` | 1 — comentário de linha e de bloco (multilinha), sem gerar token |
+| `L08_sinal_adjacencia.x` | 6 — `adjacent_to_next` em `Minus`, com e sem espaço, antes de número e de identificador |
+| `errors/L_ERR1_malformed_number.x` | 2/7 — inteiro fora de `i64` |
+| `errors/L_ERR2_unterminated_string.x` | 3/7 — string sem aspa de fechamento |
+| `errors/L_ERR3_unterminated_comment.x` | 1/7 — `/*` sem `*/` |
+| `errors/L_ERR4_invalid_character.x` | 4/7 — codepoint não-ASCII fora de string/comentário |
+
+**Aviso importante**: estes dumps foram derivados **à mão**, linha e coluna por linha e coluna,
+sem um compilador Rust disponível neste ambiente para conferi-los mecanicamente (ver nota no
+`AGENTS.md`/relatório sobre a ausência de `cargo` nesta máquina). O **formato** acima é a parte
+normativa e deve ser seguida à risca; se ao implementar a subetapa 1–7 um fixture específico
+der uma coluna diferente da esperada, siga a regra 3.3.1 do `AGENTS.md`: não ajuste o fixture para
+mascarar o comportamento do lexer — primeiro re-derive a posição manualmente a partir da gramática
+e, se o fixture estiver mesmo errado, reporte e corrija-o abertamente (é um bug no fixture, não uma
+licença para pular a verificação).
+
+## Script de execução
+
+`scripts/run-lexer-tests.sh` roda a suíte de fixtures acima via `cargo test --test
+lexer_fixtures -- --nocapture` e propaga o veredito OK/NOK (as linhas `[OK]`/`[FAIL]` por fixture
+vêm do próprio teste Rust, que as imprime antes de falhar — ver a próxima seção). `scripts/
+run-all-tests.sh` encadeia lexer → parser → milestones de codegen. Mesma regra em todas as
+etapas: o script sai com status 0 **apenas** se 100% dos casos passaram.
 
 ## Critério de conclusão da etapa
 
-Todas as subetapas acima com testes verdes (`cargo test --test lexer_tests`), incluindo casos de
-erro (`malformed-number`, string não terminada, comentário não terminado, caractere inválido) e os
-exemplos literais da gramática (Seção 3) usados como fixtures.
+A etapa Lexer só é considerada concluída quando **todos** os testes unitários por subetapa E
+**todos** os fixtures golden-file acima (sucesso e erro) passarem — isto é, quando
+`scripts/run-lexer-tests.sh` (ou `cargo test --test lexer_tests && cargo test --test
+lexer_fixtures`) sair com status 0. Não há aprovação parcial: um único fixture falhando mantém a
+etapa em aberto. Nenhum fixture pode ser alterado para acomodar um bug do lexer (AGENTS.md,
+3.3.1) — bug comprovado no fixture é reportado, não silenciado.

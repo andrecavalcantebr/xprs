@@ -1,0 +1,13 @@
+Module
+  Def dobro
+    FnDef param=x
+      Block
+        BinOp *
+          lhs: Name x
+          rhs: IntLit 2
+  Def main
+    FnDef param=_
+      Block
+        Call
+          target: Name dobro
+          arg: IntLit 21

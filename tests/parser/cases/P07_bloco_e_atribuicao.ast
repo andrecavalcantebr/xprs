@@ -1,0 +1,10 @@
+Module
+  Def main
+    FnDef param=x
+      Block
+        Assign target=a
+          Assign target=b
+            BinOp +
+              lhs: Name x
+              rhs: IntLit 1
+        Name a

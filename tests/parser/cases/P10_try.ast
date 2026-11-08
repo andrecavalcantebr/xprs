@@ -1,0 +1,10 @@
+Module
+  Def main
+    FnDef param=s
+      Block
+        Assign target=[ok, n]
+          Try
+            Call
+              target: Name int
+              arg: Name s
+        Name ok
