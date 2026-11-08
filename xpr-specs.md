@@ -3,7 +3,7 @@
 XPR é uma linguagem orientada a expressões na qual toda construção retorna um valor.
 `xprc` significa xpr compiler, o compilador.
 
-> Compilador em C (-std=gnu23, usando as extensões) 
+> Compilador em Rust, que traduz o programa para Rust e o compila com `rustc`/`cargo`
 > Executável diretamente no terminal
 > Máquina atual: Rayzen 7 com 32GB RAM, Zorin OS 18 (ambiente Linux) 
 
@@ -265,7 +265,7 @@ resultado. Efeitos colaterais já realizados, incluindo saída de dados, não s�
 ### 4.1 Módulos e import
 
 O código de outros arquivos entra na compilação apenas através de `import`. O
-compilador localiza, analisa sintaticamente e verifica cada arquivo importado antes de gerar C.
+compilador localiza, analisa sintaticamente e verifica cada arquivo importado antes de gerar código.
 Nada é buscado ou carregado quando o programa compilado executa. Um nome sem
 vinculação visível é um `undefined-identifier`; o compilador nunca busca no
 sistema de arquivos o alvo de uma chamada.
@@ -321,10 +321,13 @@ compilador deve ser capaz de relatar o caminho resolvido de cada arquivo que car
 
 * Um ciclo de imports gera um erro de compilação.
 
-* Os nomes gerados em C para membros de módulos não devem colidir com nomes
-  gerados para variáveis do usuário ou com membros de outros módulos. Isso deve ser garantido por construção, e não pela ausência de coincidências, já que identificadores podem conter `_`. O esquema é `xm_<len>_<path>__<name>`, onde
-  `<path>` é o caminho do módulo com caracteres não-identificadores codificados e
-  `<len>` é o seu comprimento; o `__` separa a codificação do nome do membro.
+* Cada módulo XPR é gerado como seu próprio módulo Rust; os membros de um módulo vivem no
+  caminho desse módulo (`caminho::nome`) no código gerado. O sistema de módulos do Rust evita por
+  construção a colisão entre membros de módulos distintos ou entre um membro e uma variável do
+  usuário, sem precisar de um esquema de *mangling* manual. Resta apenas sanitizar, de forma
+  injetiva, o caminho de arquivo do módulo (que pode conter caracteres que não são identificadores
+  válidos em Rust) para o nome do módulo Rust gerado; esse esquema de sanitização é um detalhe de
+  implementação do backend (veja `plano-codegen.md`, subetapa G).
 
 **Conteúdo do módulo**
 
@@ -333,8 +336,9 @@ compilador deve ser capaz de relatar o caminho resolvido de cada arquivo que car
 * Cada definição tem a forma `nome = inicializador`, onde o inicializador é
   uma definição de função ou uma expressão constante. A gramática na Seção 3
   estabelece a restrição para expressões constantes: nenhuma chamada de função, bloco,
-  `iif`, `for` ou atribuição fora de corpos de função. Isso reflete os
-  elementos permitidos no nível superior de um arquivo C.
+  `iif`, `for` ou atribuição fora de corpos de função. Isso garante que o nível superior de um
+  módulo seja sempre avaliável em tempo de compilação, sem depender de uma ordem de execução em
+  tempo de execução.
 
 * O nível superior de um módulo, portanto, não possui efeitos colaterais e pode ser avaliado pelo
   compilador (por exemplo, dobramento de constantes / constant folding).
@@ -353,7 +357,7 @@ não possui as palavras-chave `pub` ou `priv`.
 um argumento, normalmente escrita como `_main = fn(args){ ... };`. A ausência de
 `_main` no módulo de entrada é o erro de compilação `missing-main`, assim como um
 `_main` que não seja uma função de um parâmetro. `_main` é privado pela
-regra acima, portanto nenhum outro módulo pode chamá-lo: apenas o `main` gerado em C o
+regra acima, portanto nenhum outro módulo pode chamá-lo: apenas o `main` do programa gerado o
 chama. O runtime constrói uma lista `[string]` com os argumentos de linha de comando — o próprio nome do programa **não** faz parte da lista — e a passa
 como o único argumento. Quando `_main` retorna um int, esse valor é o status de saída do executável; qualquer outro resultado é descartado e o status de saída
 é 0. Como cada `_main` é privado ao seu módulo, uma única árvore de código fonte pode conter
@@ -627,7 +631,7 @@ Aqui `a` permanece `[1, 2]` e `b` torna-se `[9, 2]`. Atribuir `a` a `b` pode cop
 
 Uma função pode da mesma forma substituir todo o valor de um parâmetro sem alterar a variável do chamador. Capturas congeladas mantêm seus valores do momento da definição e não podem ser atribuídas (veja 4.5).
 
-A cópia física profunda (deep copy) não é necessária: como os valores são imutáveis, uma implementação pode compartilhar armazenamento entre valores, e o compartilhamento não é observável pelo programa. A implementação deve manter o armazenamento compartilhado ativo enquanto qualquer valor o utilizar (o compilador usa contagem de referências; veja [diretrizes-compilador-c.md](diretrizes-compilador-c.md)).
+A cópia física profunda (deep copy) não é necessária: como os valores são imutáveis, uma implementação pode compartilhar armazenamento entre valores, e o compartilhamento não é observável pelo programa. A implementação deve manter o armazenamento compartilhado ativo enquanto qualquer valor o utilizar (a implementação usa contagem de referências, por exemplo `Rc`/`Arc` no código Rust gerado; veja [diretrizes-runtime.md](diretrizes-runtime.md)).
 
 A indexação permanece disponível para leitura, incluindo índices sucessivos em listas aninhadas. Ler um elemento de lista retorna seu valor. Ler um índice de string retorna uma string de um codepoint. Por exemplo, `[10, 20][1]` retorna `20` e `[[1, 2], [3, 4]][1][0]` retorna `3`.
 
@@ -712,7 +716,7 @@ A anotação `[T1, ..., Tn]` com tipos iguais não fixa um comprimento: comprime
 
 * Uma função genérica exportada por um módulo é instanciada no programa que a utiliza, e é por isso que `import` aceita arquivos fonte (veja 4.1).
 
-* Os nomes das funções em C são descritos em [diretrizes-compilador-c.md](diretrizes-compilador-c.md).
+* Os nomes das funções no código gerado são descritos em [diretrizes-runtime.md](diretrizes-runtime.md).
 
 **Funções como valores.** A genericidade existe apenas em tempo de compilação: um programa em execução nunca mantém uma função genérica. Um nome vinculado com `nome = fn(...){...}` é uma *vinculação genérica*, e o compilador rastreia a qual definição cada uso do nome se refere:
 
@@ -768,7 +772,8 @@ Cada builtin recebe um argumento e retorna um resultado (veja 4.10). `α` e `β`
 
 * `int(val)`: a partir de um real, trunca em direção a zero. Falha com `overflow` quando o real for NaN, infinito ou estiver fora do intervalo de int. A partir de uma string, analisa um inteiro decimal e falha com `invalid-number` em caso contrário. A partir de um int, retorna o próprio valor. `real(val)`: a partir de um int, converte-o. A partir de uma string, analisa um real, incluindo os textos `NaN`, `INF` e `-INF`, e falha com `invalid-number` caso contrário. A partir de um real, retorna o próprio valor. Combine-os com `try` quando o texto vier de fora do programa. Não há conversão para `number` ou `bool`: o tipo resultante de uma conversão não deve depender do valor, e a verificação de valores booleanos é escrita explicitamente com comparações (`n != 0`, `s != ""`, `l != []`, `s == "true"`).
 
-* `floor(x)`, `ceil(x)`, `round(x)`, `frac(x)`: arredondamento, conforme a biblioteca `math.h` de C. Recebem um real e retornam um real. `floor` e `ceil` arredondam para baixo e para cima, respectivamente; `round` arredonda o valor meio para longe do zero; `frac` retorna a parte fracionária com sinal (`frac(x) == x - real(int(x))`). NaN e infinitos passam inalterados (`frac` deles é NaN). Para obter um int, converta explicitamente: `int(floor(x))`; é nessa conversão que um valor fora do intervalo falha.
+* `floor(x)`, `ceil(x)`, `round(x)`, `frac(x)`: arredondamento IEEE-754 padrão (o mesmo
+  comportamento de `math.h` em C ou de `f64::floor`/`ceil`/`round` em Rust). Recebem um real e retornam um real. `floor` e `ceil` arredondam para baixo e para cima, respectivamente; `round` arredonda o valor meio para longe do zero; `frac` retorna a parte fracionária com sinal (`frac(x) == x - real(int(x))`). NaN e infinitos passam inalterados (`frac` deles é NaN). Para obter um int, converta explicitamente: `int(floor(x))`; é nessa conversão que um valor fora do intervalo falha.
 
 | x | int | floor | ceil | round | frac | 
 | ----- | ----- | ----- | ----- | ----- | ----- | 
@@ -835,7 +840,8 @@ O formato `[decimais, alg_significativos]` funciona da seguinte maneira:
 
 * Caso contrário: notação científica com `alg_significativos` dígitos significativos — `0.001` é impresso como `1.00e-3`; `1234567890123456789.0` como `1.23456789012346e+18`.
 
-* O arredondamento segue o `printf` de C (arredonda o meio para o par mais próximo).
+* O arredondamento segue a convenção round-half-to-even (arredonda o meio para o par mais
+  próximo), o mesmo comportamento do `printf` de C.
 
 * `real(string(x)) == x` não é garantido; `real(format([x, [17, 17]])) == x` é garantido para todo real finito.
 
@@ -902,16 +908,20 @@ Não existe a palavra-chave `const`. As constantes de um programa são as defini
 
 O `xprc` compila todo o programa antes que qualquer execução ocorra, portanto os erros existem em duas fases: erros em **tempo de compilação**, relatados pelo `xprc` (sintaxe, nomes, tipos, módulos), e **falhas em tempo de execução**, relatadas pelo programa compilado (veja 4.9). Erros de sintaxe são detectados mesmo dentro de corpos de funções que nunca são chamadas, assim como erros de tipo e de nome.
 
-A compilação é interrompida no primeiro erro. Um diagnóstico é emitido uma vez no stderr. Erros relacionados ao código fonte incluem o nome da fonte, linha e coluna, com colunas contadas em codepoints; o C gerado mantém essas posições (`#line`) para que as falhas em tempo de execução apontem para o arquivo fonte `.x`. Erros sem uma localização no código fonte relatam o arquivo, operação ou argumento relevante. Uma compilação com falha ou uma falha em tempo de execução não capturada retorna um status de processo diferente de zero, independentemente da enumeração interna de diagnósticos. Efeitos colaterais já realizados não são desfeitos automaticamente.
+A compilação é interrompida no primeiro erro. Um diagnóstico é emitido uma vez no stderr. Erros relacionados ao código fonte incluem o nome da fonte, linha e coluna, com colunas contadas em codepoints; o código gerado embute essas posições diretamente (como literais nas chamadas ao runtime de diagnóstico) para que as falhas em tempo de execução apontem para o arquivo fonte `.x`, e não para o código Rust gerado. Erros sem uma localização no código fonte relatam o arquivo, operação ou argumento relevante. Uma compilação com falha ou uma falha em tempo de execução não capturada retorna um status de processo diferente de zero, independentemente da enumeração interna de diagnósticos. Efeitos colaterais já realizados não são desfeitos automaticamente.
 
 **Fonte única para definições de diagnóstico**
 
-O catálogo `XPR_DIAG_LIST` em [xpr_diag.def](../xpr_diag.def) é a fonte autoritativa para códigos de diagnóstico, identificadores públicos, severidades, modelos de mensagens e dicas. É um arquivo de inclusão simples (sem guards): `src/xpr.h` o expande na `XprErrorCode` e `XPR_DIAG_TABLE` do compilador, e `xprt.h` o expande na tabela de falhas do programa gerado, garantindo que o compilador e o programa compilado relatem os mesmos IDs, mensagens e dicas.
+O catálogo de diagnósticos é a fonte autoritativa para códigos, identificadores públicos,
+severidades, modelos de mensagem e dicas. Ele vive em um único módulo Rust compartilhado entre o
+compilador e o runtime do programa gerado (veja [diretrizes-runtime.md](diretrizes-runtime.md)),
+garantindo que ambos relatem exatamente os mesmos IDs, mensagens e dicas a partir de uma única
+definição, sem duplicação manual.
 Esta especificação não mantém uma tabela normativa de diagnósticos separada. Qualquer referência de diagnóstico gerada deve derivar suas entradas do catálogo em vez de duplicá-las manualmente.
 
 As seções semânticas desta especificação determinam quais operações devem falhar e quando. Nomes de erro mencionados aqui descrevem as condições semânticas; o catálogo determina o identificador e a apresentação real do diagnóstico. Se um nome em outro lugar da documentação diferir do catálogo, o catálogo prevalece para a definição do diagnóstico. Uma condição de erro exigida ainda não representada no catálogo permanece como uma tarefa de implementação; sua ausência não torna a operação válida.
 
-O design de propagação e limpeza de diagnósticos do próprio compilador é descrito em [diretrizes-diagnosticos.md](diretrizes-diagnosticos.md). No programa compilado, há um único ponto de falha no runtime: ele registra o diagnóstico; se não houver um `try` ativo, ele relata o diagnóstico — ID, mensagem e, quando presente, a dica, todos vindos do catálogo —, descarrega os buffers de saída e encerra o processo. Se houver um `try` ativo, ele faz com que cada chamada envolvente retorne, liberando o que possuía, até que o `try` seja alcançado. Ele não chama o `abort()` do C.
+No programa compilado, há um único ponto de falha no runtime: ele registra o diagnóstico; se não houver um `try` ativo, ele relata o diagnóstico — ID, mensagem e, quando presente, a dica, todos vindos do catálogo —, descarrega os buffers de saída e encerra o processo com um código de saída diferente de zero. Se houver um `try` ativo, ele faz com que cada chamada envolvente retorne, liberando o que possuía, até que o `try` seja alcançado. Esse encerramento nunca é um `panic!`/abort abrupto do processo: o diagnóstico sempre é relatado e os buffers são descarregados antes de o processo terminar.
 
 **Condições de erro obrigatórias**
 
@@ -925,13 +935,13 @@ O design de propagação e limpeza de diagnósticos do próprio compilador é de
 
 ## 8. Interface de linha de comando
 
-O compilador é invocado como `xprc [opções] <nome_do_arquivo.x>`. Ele traduz o programa para C e o compila; ele não executa o programa. Não há modo interativo, nenhuma expressão fornecida via linha de comando e nenhum código fonte lido do stdin. As formas suportadas são:
+O compilador é invocado como `xprc [opções] <nome_do_arquivo.x>`. Ele traduz o programa para Rust e o compila (usando `rustc`, diretamente ou através de `cargo`); ele não executa o programa. Não há modo interativo, nenhuma expressão fornecida via linha de comando e nenhum código fonte lido do stdin. As formas suportadas são:
 
 | Invocação | Comportamento | 
 | ----- | ----- | 
-| `xprc <nome_do_arquivo.x>` | Traduz para C e compila. Gera o executável com o nome do arquivo sem `.x`, no diretório atual. | 
+| `xprc <nome_do_arquivo.x>` | Traduz para Rust e compila. Gera o executável com o nome do arquivo sem `.x`, no diretório atual. | 
 | `xprc <nome_do_arquivo.x> -o <arquivo>` | O mesmo que o anterior, com o executável nomeado como `<arquivo>`. | 
-| `xprc --emit-c <nome_do_arquivo.x>` | Escreve apenas o C gerado, no arquivo `-o` se fornecido, ou no stdout. O compilador C não é executado. | 
+| `xprc --emit-rust <nome_do_arquivo.x>` | Escreve apenas o Rust gerado, no arquivo `-o` se fornecido, ou no stdout. O `rustc`/`cargo` não é executado. | 
 | `xprc --lex-dump <nome_do_arquivo.x>` | Exibe os tokens do arquivo para depuração (dump). | 
 | `xprc --parse-dump <nome_do_arquivo.x>` | Exibe a árvore sintática gerada do arquivo para depuração. | 
 | `xprc --type-dump <nome_do_arquivo.x>` | Exibe os tipos inferidos para depuração. | 
@@ -942,11 +952,11 @@ Opções:
 
 | Opção | Significado | 
 | ----- | ----- | 
-| `-o <arquivo>` | Nome da saída (executável ou arquivo C com `--emit-c`). | 
+| `-o <arquivo>` | Nome da saída (executável ou arquivo Rust com `--emit-rust`). | 
 | `-I <dir>` | Adiciona um diretório ao caminho de busca de `import` (veja 4.1). Pode ser repetido; os diretórios são buscados em ordem. | 
-| `--cc <comando>` | Compilador C a ser utilizado. Padrão: `cc`. O C gerado usa extensões GNU, portanto o compilador deve ser compatível com GCC (gcc, clang, MinGW). | 
-| `-O <nível>` | Nível de otimização de `0` a `3`, passado ao compilador C. Padrão: `2`. | 
-| `-v` | Relata o caminho resolvido de cada arquivo carregado por `import`, e o comando executado no compilador C. | 
+| `--rustc <comando>` | Compilador Rust a ser utilizado. Padrão: `rustc`. | 
+| `-O <nível>` | Nível de otimização de `0` a `3`, traduzido para o `-C opt-level` correspondente do `rustc`. Padrão: `2`. | 
+| `-v` | Relata o caminho resolvido de cada arquivo carregado por `import`, e o comando executado no compilador Rust. | 
 
 Regras:
 
@@ -957,7 +967,7 @@ Regras:
 * A ajuda exibe primeiramente a versão do compilador.
 
 * O executável não precisa do `xprc` para rodar: o runtime é vinculado a ele.
-  Seu `main` em C constrói a lista de argumentos e chama o `_main` do módulo de entrada
+  Seu `main` (no código Rust gerado) constrói a lista de argumentos e chama o `_main` do módulo de entrada
   (veja 4.1). O arquivo de entrada deve definir `_main`; caso contrário, a compilação
   falha com `missing-main`. A saída de dados nunca é implícita: ela deve ser solicitada
   explicitamente através de funções de saída.
