@@ -7,4 +7,11 @@ edition = "2021"
 name = "xprc"
 path = "src/main.rs"
 
+[lib]
+name = "xprc"
+path = "src/lib.rs"
+
 [dependencies]
+
+[workspace]
+members = [".", "xpr_rt"]

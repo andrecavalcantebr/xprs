@@ -236,9 +236,24 @@ Uma vez que a subetapa G exista, reaproveita diretamente os fixtures de `tests/l
 
 **Subetapas**: G por completo, integração com E.
 
+## Milestones adicionados na implementação (a suíte só cresce)
+
+Além de M0–M8 e do M9 de CLI (implementado em `tests/codegen_tests.rs`, não como diretório de
+milestone), foram registrados:
+
+| Milestone | Cobre | Subetapas |
+| --- | --- | --- |
+| `M10_profundidade_de_chamada` | recursão infinita capturada por `try` via `call-depth-exceeded` (exige executar o programa em thread de pilha grande) | F, G |
+| `M11_format_e_range` | `format([v,[4,15]])`, `range` nas 3 formas, `fill`, `at` com lista de índices, `any`/`all` | F |
+| `M12_erros_de_tempo_de_execucao` | `index-out-of-range` (lista e string), `invalid-number`, `invalid-size`, `overflow` — todos capturados por `try` | C, F, G |
+| `M13_exemplos_da_spec` | exemplos literais da Seção 4.8/4.7: cópia de listas (`a`/`b`), `[10,20][1]`, `[[1,2],[3,4]][1][0]`, `v[1, 0]`, `[d,d] = [10,11]` → 11, `-[10,-11,12,-13]` | A, C, F |
+
 ## Próximos milestones (placeholders — preencher ao implementar)
 
-* Formatação explícita (`format`), `range`/`fill`/`set`/`slice`/`at` com lista de índices.
 * `_init` e ordem de inicialização entre módulos.
-* Limite de profundidade de chamada (10.000) disparando falha, capturável por `try`.
 * Nomes privados (`_prefixo`) e erro de acesso de fora do módulo.
+* `cannot-infer` em parâmetro sem anotação cujo tipo não é determinado pelo contexto.
+* `assign-to-constant` (`pi = 3.14`).
+* Índice de tupla não constante.
+* `render-function` aninhado em listas e tuplas.
+* `input` + `end-of-input` com entrada redirecionada.

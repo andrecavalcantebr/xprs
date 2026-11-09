@@ -209,3 +209,156 @@ test result: ok. 80 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 `./scripts/run-parser-tests.sh` → `OK: etapa Parser completa (unitários + fixtures).` (exit 0).
 `./scripts/run-all-tests.sh` ainda falha, mas **apenas** nos 10 milestones de codegen, que
 dependem da CLI `xprc` — etapa seguinte.
+
+---
+
+## Etapa 3 — Codegen
+
+**Status: CONCLUÍDA.** Pipeline completo (`lex → parse → checagem de tipos → emissão de Rust →
+rustc → execução`) fechado. 20 testes unitários do catálogo+checagem, 38 testes de integração
+(emissão, semântica, CLI) e **14 milestones** de ponta a ponta, todos verdes.
+`./scripts/run-all-tests.sh` → `TUDO OK` (exit 0) com 52 + 80 unitários, 12 + 16 fixtures e 14
+milestones.
+
+### Subetapas executadas
+
+**E — Catálogo de diagnósticos (`src/diag/catalog.rs`).** Uma lista `const CATALOG` de `DiagSpec
+{ code, public_id, severity, message_template, hint }` é a **única** fonte de códigos, IDs,
+severidades, mensagens e dicas. O compilador a consome via `src/diag/mod.rs`; a crate de runtime a
+compila do **mesmo arquivo** (`#[path = "../../src/diag/catalog.rs"]`), então os dois binários
+relatam exatamente os mesmos IDs e mensagens por construção — nada é gerado nem duplicado. Cobre
+todos os nomes citados na spec (`syntax-error`, `undefined-identifier`, `type-mismatch`,
+`size-mismatch`, `cannot-infer`, `assign-to-captured`, `assign-to-constant`, `missing-main`,
+`malformed-number`, `div-by-zero`, `overflow`, `index-out-of-range`, `invalid-number`,
+`invalid-size`, `end-of-input`) mais módulo/ciclo/alias, `render-function`, `fail` e
+`call-depth-exceeded`.
+
+**F — Runtime (`xpr_rt/`, crate separada do workspace).**
+* `Value` = `Int(i64)` | `Real(f64)` | `Str(Rc<str>)` | `Bool` | `Seq(Rc<[Value]>)` |
+  `Fn(Rc<dyn Fn(Value) -> XprResult>)`. `Rc` dá a contagem de referências que a Seção 4.8 exige,
+  sem código manual; listas e tuplas compartilham a mesma representação porque a distinção é
+  estática (tamanho e tipos fixos são garantidos pela checagem).
+* `Fail` + `Result<Value, Fail>` + `?`: é o mecanismo de `try`/`fail` (Seção 4.9), sem
+  `setjmp`/`longjmp`.
+* `ops::{add, sub, mul, div, rem, lt, gt, le, ge, eq, ne, not, neg, plus, index}` implementam a
+  tabela da Seção 5.2: promoção int→real, `/` inteira, `div-by-zero`, `overflow` (`checked_*`),
+  `%` com sinal do dividendo, concatenação de strings, aritmética/comparação **elemento a
+  elemento** em listas/tuplas com `size-mismatch` em execução, `type-mismatch` escalar⊗lista (sem
+  broadcasting), strings lexicográficas por codepoint e NaN sempre falso.
+* `bi::*` implementa os builtins da Seção 5 (`print`, `println`, `len`, `input`, `fail`, `string`,
+  `format`, `int`, `real`, `floor`, `ceil`, `round`, `frac`, `any`, `all`, `cat`, `at` (1 e n
+  índices), `fill`, `range` (3 formas), `set`, `slice`, `apply`).
+* `format_real` segue a Seção 5.1 (`decimais`, `alg_significativos`, NaN/INF literais, notação
+  científica fora da faixa).
+* `recursive_closure` constrói a auto-referência necessária para recursão direta;
+  `run_main_with` executa o programa em uma thread de pilha grande (ver "Decisões" abaixo).
+
+**C — Inferência/checagem de tipos (`src/codegen/types.rs`).** Verificação estática completa
+antes de qualquer emissão: tipos `int`/`real`/`string`/`bool`/`[T]`/`[T1,…,Tn]`/`A -> R`, unificação
+int→real, tabela de operadores da Seção 5.2 (**incluindo `size-mismatch` de tuplas em tempo de
+compilação**), `iif` com condição bool e ramificações unificáveis, `for` com condição bool
+retornando int, variável com tipo único no escopo, índice int, chamada exige função, `try` rejeita
+tipo sem neutro (função), e os renderizadores rejeitam valores de função (`render-function`).
+
+**A — Resolução de nomes e escopos.** Escopos aninhados; atribuição atualiza a vinculação visível
+mais próxima e cria variável no escopo corrente quando o nome é novo; uso-após-definição na ordem
+textual; `assign-to-captured`; parâmetros sombreiam; desestruturação da esquerda para a direita
+(última atribuição prevalece). A captura é feita por **cópias explícitas** (`let __cap_x =
+x.clone();`) antes da closure `move` — o que dá, por construção, a semântica "congelado no momento
+da definição" da Seção 4.5.
+
+**B — Sistema de módulos.** Carregamento recursivo com detecção de ciclo, busca no diretório do
+arquivo importador e depois nos `-I` em ordem, alias duplicado detectado, e um `mod` Rust por
+módulo (sem *mangling* manual, como o plano previa). `alias.membro` vira `modulo::membro()`.
+
+**D — Genéricos.** Uma definição com parâmetro sem anotação recebe tipo `Any`, que unifica com
+qualquer coisa; M8 (mesma função usada com int e string) passa. Não há multiplicação de instâncias
+especializadas — ver limitação abaixo.
+
+**G — Emissão e driver (`src/codegen/mod.rs`, `src/main.rs`).** Toda expressão vira um bloco Rust
+cujo valor é `XprResult`; atribuições são emitidas **inline** em posição de statement para que as
+variáveis criadas fiquem no escopo do bloco (Seção 4.6). CLI completa da Seção 8:
+`<arquivo.x>`, `-o`, `--emit-rust`, `--lex-dump`, `--parse-dump`, `--type-dump`, `-I` (repetível),
+`--rustc`, `-O 0..3`, `-v`, `-h`/`--help`, `--version`. O Rust gerado é compilado com `rustc`
+vinculando `libxpr_rt.rlib` (compilada sob demanda e cacheada em `xpr_rt/target/xprc-rt`).
+
+### Decisões de design/arquitetura tomadas
+
+* **Closures nativas do Rust** (`move |__arg| -> XprResult { … }`) para as funções XPR, com cópias
+  explícitas das variáveis livres antes do `move`. É mais simples que um `struct` de captura
+  manual e dá a semântica de cópia congelada exatamente (o plano pedia para avaliar essa
+  alternativa e registrar a escolha).
+* **Thread de pilha grande no ponto de entrada** (512 MB). Sem isso, o limite de 10.000 chamadas
+  da spec (Seção 7) nunca era atingido: o programa estourava a pilha do sistema (SIGABRT) bem
+  antes, e `try` não conseguia capturar a falha. Com a thread dedicada, o limite vira
+  `call-depth-exceeded` capturável (milestone M10).
+* **Corpo do `try` avaliado em uma closure** (`(|| -> XprResult { … })();`). Sem isso, os `?`
+  internos propagavam pela função inteira em vez de virar o `Err` capturado — bug encontrado pelo
+  milestone M12 (erros de execução capturados).
+* **Atribuições emitidas inline**, não dentro de `{ … }`: um `{ a = 1; }` criaria a variável num
+  escopo que morre no fim da sub-expressão, violando a Seção 4.6.
+* **`v[a, b, c]`** é emitido como `let`s encadeados de `ops::index`, cada um com `?`, num bloco
+  cujo valor é o último `Ok(...)` — resolve o aninhamento sem gerar `?` sobrando (bug encontrado
+  pelo milestone M13).
+* **Valor neutro do `try` escolhido pela forma sintática da expressão** (`int(...)` → `0`,
+  `string(...)` → `""`, comparação/`and`/`or` → `false`, literal real → `0.0`, colchetes → `[]`,
+  resto → `0`). A spec define o neutro **por tipo**; sem inferência completa, a forma sintática é
+  a aproximação disponível. Ver limitação abaixo.
+* **Diagnósticos de compilação** usam o formato `arquivo:linha,coluna: error[id]: mensagem` (+
+  dica); falhas de execução usam o mesmo catálogo e mostram `linha,coluna` do `.x` original,
+  embutidas como literais pelo emissor (Seção 7).
+* **`_main` recebe a lista de argumentos do processo** (`std::env::args().skip(1)`), e o status de
+  saída do programa é o int retornado por `_main` (ou `1` se houver falha não capturada).
+
+### Limitações conhecidas (registradas, não mascaradas)
+
+1. **`cannot-infer` não é emitido.** Funções sem anotação no parâmetro recebem `Ty::Any` em vez de
+   falhar, e a especialização de genéricos (Seção 4.10) não gera instâncias separadas. Programas
+   que a spec rejeitaria com `cannot-infer` hoje passam.
+2. **`assign-to-constant` não é emitido.** Atribuir a `pi`, `E`, `true`, `false`, `NaN` ou `INF`
+   não é detectado (a atribuição simplesmente cria uma variável local de mesmo nome, como Rust
+   faria com um shadowing — não é o comportamento da spec).
+3. **Neutro do `try` aproximado pela forma sintática**, conforme explicado acima; para tipos
+   compostos ou variáveis o neutro cai em `0`, que pode divergir do neutro do tipo.
+4. **`format` científico** usa `significant - 1` dígitos após o ponto quando `significant < 15`,
+   e 2 quando é o padrão 15. O exemplo `0.001 → 1.00e-3` da spec é batido (milestone M11), mas a
+   regra geral de "quantos significativos aparecem na mantissa" não está inteiramente
+   especificada no documento.
+5. **Índice de tupla deveria ser constante** (Seção 4.8); a checagem verifica apenas que é `int`.
+6. **`_init` e ordem de inicialização entre módulos** não foram implementados (a spec menciona,
+   mas nenhum milestone os exige ainda).
+7. **Nomes privados (`_prefixo`) e `import` como statement de bloco** estão rejeitados/marcados
+   como erro, mas sem a distinção "primeiras instruções do bloco mais externo do programa".
+8. **`-O`, `--rustc` e `-v` funcionam**, mas `cargo` é sempre usado para compilar a crate de
+   runtime (o `--rustc` afeta apenas a compilação do arquivo gerado).
+
+### Resultado final dos testes
+
+```
+     Running unittests src/lib.rs
+running 20 tests
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+     Running tests/codegen_tests.rs
+running 38 tests
+test result: ok. 38 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+     Running tests/lexer_fixtures.rs
+test result: ok. 1 passed; 0 failed; ... (12/12 fixtures)
+     Running tests/lexer_tests.rs
+running 52 tests
+test result: ok. 52 passed; 0 failed
+     Running tests/parser_fixtures.rs
+test result: ok. 1 passed; 0 failed; ... (16/16 fixtures)
+     Running tests/parser_tests.rs
+running 80 tests
+test result: ok. 80 passed; 0 failed
+```
+
+Milestones (`./scripts/run-codegen-milestones.sh`): **14/14 OK** — M0 hello, M1 aritmética, M2
+`iif`, M3 `for`, M4 closures, M5 listas, M6 `try`, M6b falha não capturada, M7 módulos, M8
+genéricos, M10 profundidade de chamada, M11 `format`/`range`/`fill`/`at`/`any`/`all`, M12 erros de
+tempo de execução capturados, M13 exemplos da spec (cópias, indexação múltipla, alvos repetidos,
+negação de lista).
+
+`./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).
