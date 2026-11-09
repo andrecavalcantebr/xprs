@@ -17,9 +17,11 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
   fechado. 20 testes unitários (catálogo + checagem de tipos), 38 de integração (emissão,
   semântica, CLI) e 14 milestones de ponta a ponta.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
-* **Próxima ação**: Fase 3 de `AGENTS.md` [3] — gerar `RELATORIO_FINAL.md`. Opcionalmente,
-  atacar as limitações listadas abaixo (elas não bloqueiam o gate, mas são lacunas reais em
-  relação à spec).
+* **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
+  compilador, estratégia de testes, lições aprendidas e status final.
+* **Próxima ação**: o processo do `AGENTS.md` está completo. Restam apenas as **limitações
+  conhecidas** abaixo, que não bloqueiam o gate mas são lacunas reais em relação à spec — fechar
+  uma delas exige escrever primeiro o teste/milestone e depois a implementação.
 
 ## Como o projeto está montado
 
@@ -94,15 +96,15 @@ Detalhes em `RELATORIO_PROGRESSO.md`, seção "Etapa 3 — Codegen":
 
 ## Próxima ação concreta
 
-1. **Gerar `RELATORIO_FINAL.md`** (AGENTS.md [3]): consolidar arquitetura da linguagem, estrutura
-   do compilador, lições aprendidas (incluindo os bugs encontrados pelos milestones: `?` vazando
-   do `try`, atribuição em escopo errado, profundidade de chamada, `Indexed` multinível) e status
-   final por etapa — lexer, parser, codegen, com números de teste.
-2. Commitar (`RELATORIO_FINAL.md` + `ESTADO_DO_PROJETO.md` atualizado).
-3. **Opcional, se o usuário quiser fechar lacunas**: escolher um item das "Limitações conhecidas"
-   acima, escrever **primeiro** o milestone em `tests/codegen/milestones/` (regra de evolução:
-   a suíte só cresce) ou o teste unitário, e só então implementar. Cada lacuna fechada remove uma
-   linha da lista de limitações no relatório e neste arquivo.
+O processo de `AGENTS.md` (Fases 1, 2 e 3) está **completo**. Para continuar evoluindo:
+
+1. Escolher **um** item das "Limitações conhecidas" acima (sugestão de ordem por valor/esforço:
+   `assign-to-constant`, depois `cannot-infer`, depois neutro do `try` por tipo, depois índice de
+   tupla constante, depois `_init`/ordem de inicialização, depois nomes privados).
+2. Escrever **primeiro** o teste — milestone em `tests/codegen/milestones/` (a suíte só cresce) ou
+   unitário em `src/codegen/types.rs`/`tests/codegen_tests.rs` — e confirmar que ele falha.
+3. Implementar até o gate voltar a `TUDO OK`, remover a linha correspondente da lista de
+   limitações em `RELATORIO_FINAL.md` e neste arquivo, e commitar.
 
 ## Regra de manutenção deste arquivo
 
