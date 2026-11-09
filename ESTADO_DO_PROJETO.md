@@ -11,87 +11,84 @@ próxima ação**, e deve ser atualizado — não só expandido — cada vez que
 ## Status atual
 
 * **Fase 1 (Planejamento) do `AGENTS.md`: CONCLUÍDA.**
-* **Fase 2 (Execução Incremental): NÃO INICIADA.** Nenhuma linha de lógica de lexer, parser ou
-  codegen foi escrita. `src/main.rs` é só um placeholder (`println!("xprc: nao implementado
-  ainda")`).
-* **Próxima ação**: começar a etapa **Lexer**, subetapa 1 ("Núcleo") de `plano-lexer.md`, em TDD.
-  Ver "Próxima ação concreta" abaixo para o passo a passo.
+* **Fase 2 — Etapa Lexer: CONCLUÍDA.** 52 testes unitários (`tests/lexer_tests.rs`, subetapas 1–7)
+  + 12 fixtures golden-file (`tests/lexer_fixtures.rs` sobre `tests/lexer/cases/`) verdes.
+  `scripts/run-lexer-tests.sh` sai com status `0`. Detalhes e decisões em
+  `RELATORIO_PROGRESSO.md`, seção "Etapa 1 — Lexer".
+* **Próxima ação**: iniciar a etapa **Parser** (`plano-parser.md`), em TDD, com o mesmo padrão de
+  gate do Lexer. Ver "Próxima ação concreta" abaixo.
 
 ## Inventário do que já existe
 
 * **`xpr-specs.md`** — especificação canônica da linguagem XPR (única; a cópia duplicada
   `especifica_o_xpr.md` foi removida — ver git log). Já reflete Rust como linguagem de
   implementação **e** de geração de código (`xprc` traduz XPR para Rust e compila com
-  `rustc`/`cargo`). O projeto começou com a spec apontando para C; isso foi migrado por completo,
-  não é mais um ponto em aberto.
-* **`plano-lexer.md`**, **`plano-parser.md`**, **`plano-codegen.md`** — plano de cada etapa:
-  esboço de API, subetapas em ordem de TDD, decisões de arquitetura já fixadas, formato de dump
-  golden-file e tabela de fixtures.
-* **`plano-testes-codegen.md`** — plano de testes **evolutivo** (milestones M0–M8, mais
-  placeholders) para quando a etapa Codegen existir; não é uma lista fechada, cresce com o
-  projeto.
+  `rustc`/`cargo`).
+* **`plano-lexer.md`** (executado), **`plano-parser.md`**, **`plano-codegen.md`** — plano de cada
+  etapa: esboço de API, subetapas em ordem de TDD, decisões de arquitetura já fixadas, formato de
+  dump golden-file e tabela de fixtures.
+* **`plano-testes-codegen.md`** — plano de testes **evolutivo** (milestones M0–M8) para a etapa
+  Codegen; cresce com o projeto.
+* **`src/lexer/token.rs`** — `Span`, `TokenKind`, `Token`, `LexErrorKind`, `LexError`
+  (API exatamente como no plano).
+* **`src/lexer/mod.rs`** — `Lexer::new(&str)` + `Lexer::tokenize() -> Result<Vec<Token>, LexError>`.
+  Iteração por codepoint, comentários, strings brutas, números, identificadores/keywords,
+  operadores/pontuação e cálculo de `adjacent_to_next`. Nenhuma dependência externa.
+* **`tests/lexer_tests.rs`** — 52 testes unitários das subetapas 1–7 do lexer.
+* **`tests/lexer_fixtures.rs`** — runner golden-file do lexer (`[OK]`/`[FAIL]` por fixture).
 * **`tests/lexer/cases/`** (12 fixtures: 8 sucesso + 4 erro) e **`tests/parser/cases/`** (16
-  fixtures: 11 sucesso + 5 erro) — pares `.x` + dump esperado (`.tokens`/`.ast`/`.error`).
-  Verificados **mecanicamente** (não só à mão) contra implementações de referência descartáveis
-  de lexer/parser escritas fora deste repositório, numa sessão em que `cargo`/`rustc` já estavam
-  disponíveis — os 28 fixtures bateram exatamente. Essas implementações de referência **não**
-  fazem parte do projeto e não devem ser procuradas aqui; servem só para dizer que o formato e os
-  valores dos fixtures estão corretos.
-* **`tests/codegen/milestones/`** (9 diretórios, M0–M8) — ainda não executáveis (não existe
-  `xprc`), mas o conteúdo (`.x` + `expected.stdout`/`.exit`/`.exit.nonzero`/`.stderr.contains`) já
-  está escrito e o valor de M1 (aritmética) foi conferido com a semântica de inteiros do próprio
-  Rust.
-* **`scripts/run-lexer-tests.sh`**, **`run-parser-tests.sh`**, **`run-codegen-milestones.sh`**,
-  **`run-all-tests.sh`** — runners OK/NOK em bash puro. Os dois primeiros pressupõem testes de
-  integração Rust chamados `tests/lexer_fixtures.rs` e `tests/parser_fixtures.rs` que **ainda não
-  existem** — são, na prática, o primeiro código do projeto a ser escrito (antes até da lógica do
-  lexer, por TDD).
-* **`Cargo.toml` / `src/main.rs`** — esqueleto mínimo. `cargo build`/`cargo run` confirmados
-  funcionando com o toolchain instalado (`cargo`/`rustc` 1.75.0). **Importante**: `edition` está
-  em `"2021"`, não `"2024"` — 1.75.0 não suporta a edition 2024 (ela só existe a partir do Rust
-  1.85). Não mude isso sem conferir a versão do toolchain disponível.
+  fixtures: 11 sucesso + 5 erro) — pares `.x` + dump esperado (`.tokens`/`.ast`/`.error`),
+  verificados mecanicamente contra implementações de referência descartáveis fora deste
+  repositório. Os 12 do lexer passam com a implementação atual.
+* **`tests/codegen/milestones/`** (9 diretórios, M0–M8) — ainda não executáveis (não existe CLI
+  `xprc` funcional).
+* **`scripts/run-lexer-tests.sh`** (unitários + fixtures do lexer), **`run-parser-tests.sh`** e
+  **`run-codegen-milestones.sh`** (este último pressupõe `tests/parser_fixtures.rs` e a CLI),
+  **`run-all-tests.sh`** (encadeia as três etapas).
+* **`Cargo.toml` / `src/main.rs`** — esqueleto mínimo. `edition = "2021"` (toolchain instalado é
+  `cargo`/`rustc` 1.75.0, que não aceita edition 2024). `src/main.rs` ainda imprime
+  `xprc: nao implementado ainda` — a CLI só ganha corpo na etapa Codegen.
 * **Git**: histórico completo do planejamento está nos commits (`git log`); não duplicado aqui.
 
 ## Decisões de arquitetura já tomadas (não reabrir sem motivo novo)
 
 * `xprc` traduz XPR para **Rust** e compila com `rustc`/`cargo` — nunca para C. Ver
   `plano-codegen.md`, subetapas E/F/G.
-* Catálogo de diagnósticos: módulo Rust único (`src/diag/catalog.rs`), compartilhado
-  diretamente pelo compilador e pela crate de runtime (`xpr_rt`) — nada é gerado de um lado para
-  o outro.
+* Catálogo de diagnósticos: módulo Rust único (`src/diag/catalog.rs`), compartilhado diretamente
+  pelo compilador e pela crate de runtime (`xpr_rt`) — nada é gerado de um lado para o outro.
 * Runtime (`xpr_rt`): `try`/`fail` via `Result<Value, Fail>` + `?`, não `setjmp`/`longjmp`.
-* AST do parser **não tem** nó `Paren` (parênteses só guiam precedência; a árvore já representa o
-  agrupamento pela própria forma).
+* AST do parser **não tem** nó `Paren` (parênteses só guiam precedência).
 * `Span` (lexer) tem `line_start`/`line_end`/`col_start`/`col_end` — não um único `line` — porque
-  uma `StringLit` pode cruzar linhas.
+  uma `StringLit` pode cruzar linhas. Contagem sempre em **codepoints**.
 * `SyntaxErrorKind` (parser) é um enum fechado, não uma `String` livre — os testes golden-file
   comparam `kind`+`span`, nunca a mensagem.
+* (Lexer, fixado na prática) `Token::adjacent_to_next` só é `true` em `Plus`/`Minus` e é calculado
+  comparando o fim do sinal com o início do token seguinte; `Eof` nunca conta. Strings são
+  delimitadas sem decodificar escapes; `int_lit` fora de `i64` → `MalformedNumber`.
 
-Se uma dessas decisões parecer errada ao implementar, **reporte ao usuário** (como qualquer bug de
-fixture, por AGENTS.md 3.3.1) em vez de simplesmente revertê-la.
+Se alguma dessas decisões parecer errada ao implementar, **reporte ao usuário** (como qualquer bug
+de fixture, por AGENTS.md 3.3.1) em vez de simplesmente revertê-la.
 
 ## Próxima ação concreta
 
-1. Ler `plano-lexer.md` por completo.
-2. Criar o teste de integração `tests/lexer_fixtures.rs`: itera `tests/lexer/cases/*.x` (compara
-   com `.tokens`) e `tests/lexer/cases/errors/*.x` (compara com `.error`), no formato de dump
-   exato descrito em `plano-lexer.md`. Esse teste deve existir **antes** da lógica do lexer
-   (TDD) e imprimir `[OK]`/`[FAIL]` por fixture.
-3. Implementar `src/lexer/` (`token.rs`, `mod.rs`) seguindo o esboço de API de `plano-lexer.md`,
-   subetapa por subetapa (1 a 7 — Núcleo, Números, Strings, Identificadores/keywords,
-   Operadores/pontuação, Adjacência de sinal, Erros/posições), cada uma com seus próprios testes
-   unitários antes da lógica.
-4. Gate de conclusão: `scripts/run-lexer-tests.sh` sai com status `0` — ou seja, os testes
-   unitários de todas as subetapas **e** os 12 fixtures golden-file passam a 100%. Sem exceção.
-5. Ao concluir: criar/atualizar `RELATORIO_PROGRESSO.md` (seção "Lexer", conforme `AGENTS.md`
-   Fase 3), commitar, e **atualizar este arquivo** — status passa para "Lexer concluído, próxima
-   ação: Parser", e o inventário/decisões acima são corrigidos se algo mudou durante a
-   implementação.
-6. Depois do Lexer: Parser (`plano-parser.md`, mesmo padrão de gate). Depois: Codegen
-   (`plano-codegen.md`, subetapas A–G, mais o roteiro evolutivo de `plano-testes-codegen.md` via
-   `scripts/run-codegen-milestones.sh`).
-7. Ao final de tudo (Codegen funcional e testado): gerar `RELATORIO_FINAL.md` conforme `AGENTS.md`
-   [3].
+1. Ler `plano-parser.md` por completo (AST, esboço de API, subetapas A–F, formato do dump `.ast`).
+2. Criar `tests/parser_fixtures.rs` — iterar `tests/parser/cases/*.x` (par com `.ast`) e
+   `tests/parser/cases/errors/*.x` (par com `.error`), no formato exato de `plano-parser.md`,
+   imprimindo `[OK]`/`[FAIL]` por fixture. Deve existir **antes** da lógica do parser (TDD) e
+   consumir `xprc::lexer::Lexer`.
+3. Implementar `src/parser/` subetapa por subetapa (A–F), com testes unitários próprios para cada
+   uma antes da lógica correspondente, incluindo a regra de adjacência de sinal
+   (`adjacent_to_next` → `syntax-error`) que o lexer deliberadamente não decide.
+4. Gate de conclusão: `scripts/run-parser-tests.sh` sai com status `0` — testes unitários de todas
+   as subetapas **e** os 16 fixtures golden-file a 100%. Sem exceção; fixture que pareça errado é
+   reportado, nunca ajustado para mascarar bug (AGENTS.md 3.3.1).
+5. Ao concluir: atualizar `RELATORIO_PROGRESSO.md` (nova seção "Etapa 2 — Parser"), commitar e
+   **atualizar este arquivo** (status → "Parser concluído, próxima ação: Codegen").
+6. Depois: Codegen (`plano-codegen.md`, subetapas A–G: runtime `xpr_rt`, catálogo de diagnósticos,
+   geração de Rust, driver CLI com `--lex-dump`/`--parse-dump`/`--emit-rust` etc., mais o roteiro
+   evolutivo de `plano-testes-codegen.md` via `scripts/run-codegen-milestones.sh`).
+7. Ao final de tudo (Codegen funcional e testado): gerar `RELATORIO_FINAL.md` conforme
+   `AGENTS.md` [3].
 
 ## Regra de manutenção deste arquivo
 
