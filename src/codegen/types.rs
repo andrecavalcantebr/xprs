@@ -240,13 +240,19 @@ impl<'a> TypeChecker<'a> {
         self.imported.insert(alias.to_string(), members);
     }
 
-    /// Verifica um módulo inteiro e devolve os tipos das suas definições (exportados).
+    /// Verifica um módulo inteiro e devolve os tipos das suas definições **exportadas** —
+    /// nomes com `_` inicial são privados ao módulo e não saem daqui (Seção 4.1).
     pub fn check_module(&mut self, module: &Module) -> Result<HashMap<String, Ty>, SemaError> {
         for def in &module.definitions {
             let ty = self.check_definition(def)?;
             self.globals.insert(def.name.clone(), ty);
         }
-        Ok(self.globals.clone())
+        Ok(self
+            .globals
+            .iter()
+            .filter(|(name, _)| !name.starts_with('_'))
+            .map(|(name, ty)| (name.clone(), ty.clone()))
+            .collect())
     }
 
     fn check_definition(&mut self, def: &Definition) -> Result<Ty, SemaError> {
@@ -533,6 +539,18 @@ impl<'a> TypeChecker<'a> {
         span: Span,
     ) -> Result<Ty, SemaError> {
         if let Some(alias) = module_alias {
+            // Seção 4.1: um nome que começa com `_` é privado ao seu módulo — de fora, o acesso
+            // qualificado é erro de compilação (mesmo se o membro existir).
+            if name.starts_with('_') {
+                return Err(self.error(
+                    DiagCode::UndefinedIdentifier,
+                    span,
+                    format!(
+                        "{} é privado do módulo {} (nomes com _ não são exportados; Seção 4.1)",
+                        name, alias
+                    ),
+                ));
+            }
             return match self.imported.get(alias).and_then(|members| members.get(name)) {
                 Some(ty) => Ok(ty.clone()),
                 None => Err(self.error(

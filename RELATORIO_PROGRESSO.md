@@ -332,8 +332,9 @@ vinculando `libxpr_rt.rlib` (compilada sob demanda e cacheada em `xpr_rt/target/
 6. **`_init` e ordem de inicialização entre módulos — FECHADO na subetapa pós-Codegen** (ver
    seção "Pós-Codegen: fechamento de `_init` e ordem de inicialização" abaixo), com o
    milestone M14.
-7. **Nomes privados (`_prefixo`) e `import` como statement de bloco** estão rejeitados/marcados
-   como erro, mas sem a distinção "primeiras instruções do bloco mais externo do programa".
+7. **Nomes privados — FECHADO na subetapa pós-Codegen** (ver seção "Pós-Codegen: fechamento
+   dos nomes privados" abaixo). `import` como statement de bloco continua rejeitado pelo
+   parser/checker, que é o que a Seção 4.1 exige (import só nas primeiras linhas do módulo).
 8. **`-O`, `--rustc` e `-v` funcionam**, mas `cargo` é sempre usado para compilar a crate de
    runtime (o `--rustc` afeta apenas a compilação do arquivo gerado).
 
@@ -575,4 +576,40 @@ Quinta limitação fechada, mesmo processo (teste primeiro → implementação �
 cargo test --lib                → 40 passed; 0 failed
 cargo test --test codegen_tests → 50 passed; 0 failed (47 + 3 e2e novos)
 ./scripts/run-all-tests.sh      → TUDO OK (exit 0); milestones 15/15 OK (M14 novo)
+```
+
+---
+
+## Pós-Codegen: fechamento dos nomes privados (Seção 4.1)
+
+Sexta limitação fechada, mesmo processo (teste primeiro → implementação → gate `TUDO OK`).
+
+### Atividades realizadas
+
+* **Testes primeiro (TDD)**: 1 integração de erro (`alias._aux(...)` de fora → `undefined-
+  identifier`) + 1 e2e (o mesmo `_aux` usado **sem qualificação** no próprio módulo continua
+  funcionando e alimenta a função pública). Confirmado: o teste de erro falhava antes (o acesso
+  externo passava); o positivo já passava (não-regressão).
+* **Implementação**: `check_name` rejeita acesso qualificado a nome com `_` inicial
+  (`types.rs`); `check_module` filtra nomes privados do mapa exportado; `emit_name` repete a
+  regra (defensivamente, já que o pipeline aborta no checker — o emissor também é usado sobre
+  ASTs que passaram pela checagem).
+
+### Decisões de design
+
+* **Privacidade na checagem, não no export**: filtrar o mapa exportado sozinho devolveria
+  "membro inexistente" em vez de explicar a privacidade; a mensagem agora diz que o nome é
+  privado (Seção 4.1). O filtro do export permanece como defesa em profundidade.
+* **Divergência da spec registrada, não "consertada"**: a Seção 4.1 diz "definir o mesmo nome
+  duas vezes é um erro de compilação", mas a Seção 4.5 (exemplo das "variáveis salvas"):
+  `c = 9; …; c = 19;` **redefine** e o milestone M4 depende disso (`fat` redefinido). Como as
+  duas seções se contradizem, o comportamento da 4.5 foi mantido e a contradição fica registrada
+  para decisão futura — em nenhum dos casos o compilador está "mascarando" um erro.
+
+### Resultado dos testes
+
+```
+cargo test --lib                → 40 passed; 0 failed
+cargo test --test codegen_tests → 52 passed; 0 failed (50 + 2 novos)
+./scripts/run-all-tests.sh      → TUDO OK (exit 0); milestones 15/15 OK
 ```

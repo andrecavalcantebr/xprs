@@ -589,6 +589,14 @@ impl<'a> Emitter<'a> {
         span: Span,
     ) -> Result<String, SemaError> {
         if let Some(alias) = module_alias {
+            // Seção 4.1: nomes iniciados por `_` são privados ao módulo de origem.
+            if name.starts_with('_') {
+                return Err(SemaError::new(
+                    DiagCode::UndefinedIdentifier,
+                    span,
+                    format!("{} é privado do módulo {} (Seção 4.1)", name, alias),
+                ));
+            }
             let module = match self.aliases.get(alias) {
                 Some(module) => module.clone(),
                 None => {

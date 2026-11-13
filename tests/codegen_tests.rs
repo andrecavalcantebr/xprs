@@ -256,6 +256,35 @@ fn compile_and_run_files(name: &str, files: &[(&str, &str)]) -> (String, i32, St
 }
 
 #[test]
+fn emit_membro_privado_nao_pode_ser_acessado_de_fora() {
+    // Seção 4.1: "acessar `alias._nome` de fora gera um erro de compilação" — `_` é o único
+    // mecanismo de visibilidade da linguagem.
+    let dep = module_unit("dep", "_aux = fn(x){ x; };\npublico = fn(x){ _aux(x); };\n");
+    let main = module_unit(
+        "main",
+        "import(\"dep\", \"d\");\n_main = fn(a){ d._aux(1); 0; };\n",
+    );
+    match emit_program("main", &[dep, main]) {
+        Ok(_) => panic!("esperava erro de compilação ao acessar membro privado"),
+        Err(err) => assert_eq!(err.code, DiagCode::UndefinedIdentifier),
+    }
+}
+
+#[test]
+fn e2e_membro_privado_visivel_dentro_do_proprio_modulo() {
+    // O mesmo `_aux` usado **sem qualificação** dentro do módulo é normal.
+    let (stdout, code, _) = compile_and_run_files(
+        "privado_ok",
+        &[
+            ("dep.x", "_aux = fn(x){ x * 3; };\npublico = fn(x){ _aux(x); };\n"),
+            ("main.x", "import(\"dep\", \"d\");\n_main = fn(a){ println(string(d.publico(14))); 0; };\n"),
+        ],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "42\n");
+}
+
+#[test]
 fn e2e_init_roda_antes_do_main_na_ordem_de_dependencia() {
     // Seção 4.1: imports em profundidade, depois o `_init` do entry, depois `_main`.
     let (stdout, code, _) = compile_and_run_files(

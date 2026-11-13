@@ -19,6 +19,13 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
+* **Pós-Codegen: limitação "nomes privados" FECHADA** (Seção 4.1): nome iniciado por `_` é
+  privado ao módulo — `alias._nome` de fora é `undefined-identifier` (checado em `check_name` e,
+  defensivamente, em `emit_name`); `check_module` deixa de exportar nomes privados; o uso sem
+  qualificação dentro do módulo continua normal. Observação: a Seção 4.1 também diz "definir o
+  mesmo nome duas vezes é um erro", o que **conflita** com a Seção 4.5 (exemplo das "variáveis
+  salvas": `c = 9; … c = 19;`) e com o milestone M4 — mantido o comportamento da 4.5 e a
+  divergência fica registrada como pendência de decisão da spec, não do compilador.
 * **Pós-Codegen: limitação "_init / ordem de inicialização" FECHADA** (Seção 4.1): cada módulo
   com `_init` é chamado uma vez com `[]` antes de `_main`, na ordem de dependência (a pós-ordem
   DFS do carregador: imports antes do importador, independentes na ordem textual, entry por
@@ -108,6 +115,8 @@ Documentos: `xpr-specs.md` (especificação canônica), `plano-lexer.md` e `plan
 * `param_pattern` é obrigatório (`fn()` não existe); `fn_call` só chama `qualified_name`;
   `MultiArgCall` aponta para a vírgula; `InvalidAssignmentTarget` aponta para o `=`.
 * `edition = "2021"` (toolchain instalado: 1.75.0; edition 2024 exigiria 1.85+).
+* **Nomes privados** (Seção 4.1): `_` inicial = privado ao módulo; a checagem é no
+  `check_name`/`emit_name` do acesso qualificado, e `check_module` não exporta privados.
 * **`_init`** (Seção 4.1): emitido no `main` gerado na ordem de `modules` (já pós-ordem DFS do
   carregador) e chamado via `xpr_rt::call` + `xpr_rt::force`; nada mudou no runtime.
 * **Neutro do `try` por tipo** (Seção 4.9): o checker publica `try_types` (span → Ty) e o
@@ -137,18 +146,20 @@ Detalhes em `RELATORIO_PROGRESSO.md`, seção "Etapa 3 — Codegen":
    da limitação 2.
 2. Genéricos não geram instâncias especializadas (Seção 4.10) — funcionam via `Any`.
 3. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas.
-4. Nomes privados (`_prefixo`) e `import` como statement de bloco sem a distinção exata da spec.
 
-(Fechadas: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla constante, neutro do `try` por tipo e `_init`/ordem de inicialização — ver seções "Pós-Codegen" do RELATORIO_PROGRESSO.md.)
+(Fechadas: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla constante, neutro
+do `try` por tipo, `_init`/ordem de inicialização e nomes privados — ver seções "Pós-Codegen" do
+RELATORIO_PROGRESSO.md. Pendência de decisão da spec: "definir o mesmo nome duas vezes é erro"
+(Seção 4.1) × redefinição no nível de módulo (Seção 4.5 e milestone M4).)
 
 ## Próxima ação concreta
 
 O processo de `AGENTS.md` (Fases 1, 2 e 3) está **completo**. Para continuar evoluindo:
 
 1. Escolher **um** item das "Limitações conhecidas" acima (sugestão de ordem por valor/esforço:
-   nomes privados — ou especialização de genéricos, que fecha o restante de `cannot-infer`).
-   Já fechados: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla constante,
-   neutro do `try` por tipo e `_init`/ordem de inicialização (ver "Status atual").
+   especialização de genéricos, que fecha o restante de `cannot-infer`). **Todas as demais
+   limitações foram fechadas** (ver "Status atual"); o passo 1 agora é escolher entre
+   especialização de genéricos e formatação científica.
 2. Escrever **primeiro** o teste — milestone em `tests/codegen/milestones/` (a suíte só cresce) ou
    unitário em `src/codegen/types.rs`/`tests/codegen_tests.rs` — e confirmar que ele falha.
 3. Implementar até o gate voltar a `TUDO OK`, remover a linha correspondente da lista de
