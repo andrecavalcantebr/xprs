@@ -65,6 +65,8 @@ const CONSTANTS: &[(&str, &str)] = &[
     ("NaN", "Ok(xpr_rt::Value::Real(f64::NAN))"),
     ("INF", "Ok(xpr_rt::Value::Real(f64::INFINITY))"),
     ("pi", "Ok(xpr_rt::Value::Real(std::f64::consts::PI))"),
+    ("PI", "Ok(xpr_rt::Value::Real(std::f64::consts::PI))"),
+    ("e", "Ok(xpr_rt::Value::Real(std::f64::consts::E))"),
     ("E", "Ok(xpr_rt::Value::Real(std::f64::consts::E))"),
 ];
 

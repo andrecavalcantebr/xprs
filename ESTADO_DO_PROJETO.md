@@ -19,6 +19,13 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
+* **Pós-Codegen: limitação `assign-to-constant` FECHADA** (Seção 6). Constantes predefinidas
+  (`true`/`false`/`NaN`/`INF`/`pi`/`PI`/`e`/`E`) são somente leitura em qualquer escopo; nomes de
+  nível superior são somente leitura dentro de funções (redefinição no nível de módulo continua
+  válida, Seção 4.5). Gate segue `TUDO OK`; números atuais: 26 unitários de tipos, 41 de
+  integração, 14/14 milestones. Incidente 3.3.1 registrado: M12 usava `e` como variável local e
+  foi renomeado para `f`/`xf` (conformidade com a Seção 6 — ver RELATORIO_PROGRESSO.md, seção
+  "Pós-Codegen").
 * **Próxima ação**: o processo do `AGENTS.md` está completo. Restam apenas as **limitações
   conhecidas** abaixo, que não bloqueiam o gate mas são lacunas reais em relação à spec — fechar
   uma delas exige escrever primeiro o teste/milestone e depois a implementação.
@@ -77,6 +84,11 @@ Documentos: `xpr-specs.md` (especificação canônica), `plano-lexer.md` e `plan
 * `param_pattern` é obrigatório (`fn()` não existe); `fn_call` só chama `qualified_name`;
   `MultiArgCall` aponta para a vírgula; `InvalidAssignmentTarget` aponta para o `=`.
 * `edition = "2021"` (toolchain instalado: 1.75.0; edition 2024 exigiria 1.85+).
+* **Somente leitura da Seção 6**: `predefined_constant` (types.rs) é a fonte única das constantes
+  predefinidas (`true`/`false` bool; `NaN`/`INF`/`pi`/`PI`/`e`/`E` real, ambos os grafões);
+  `assign` é *local-first* e aplica `assign-to-constant` a constantes em qualquer escopo e a
+  nomes de nível superior quando `scopes.len() > 1` (dentro de função/bloco). Redefinição no
+  nível de módulo continua válida (Seção 4.5).
 
 Se alguma dessas decisões parecer errada ao implementar, **reporte ao usuário** (AGENTS.md 3.3.1)
 em vez de simplesmente revertê-la.
@@ -86,21 +98,23 @@ em vez de simplesmente revertê-la.
 Detalhes em `RELATORIO_PROGRESSO.md`, seção "Etapa 3 — Codegen":
 
 1. `cannot-infer` não é emitido (parâmetro sem anotação vira `Ty::Any`).
-2. `assign-to-constant` não é emitido (`pi = 3.14` passa).
-3. Genéricos não geram instâncias especializadas (Seção 4.10) — funcionam via `Any`.
-4. Neutro do `try` aproximado pela forma sintática da expressão.
-5. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas.
-6. Índice de tupla não é verificado como constante.
-7. `_init`/ordem de inicialização entre módulos não implementados.
-8. Nomes privados (`_prefixo`) e `import` como statement de bloco sem a distinção exata da spec.
+2. Genéricos não geram instâncias especializadas (Seção 4.10) — funcionam via `Any`.
+3. Neutro do `try` aproximado pela forma sintática da expressão.
+4. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas.
+5. Índice de tupla não é verificado como constante.
+6. `_init`/ordem de inicialização entre módulos não implementados.
+7. Nomes privados (`_prefixo`) e `import` como statement de bloco sem a distinção exata da spec.
+
+(Fechadas: `assign-to-constant` — ver seção "Pós-Codegen" do RELATORIO_PROGRESSO.md.)
 
 ## Próxima ação concreta
 
 O processo de `AGENTS.md` (Fases 1, 2 e 3) está **completo**. Para continuar evoluindo:
 
 1. Escolher **um** item das "Limitações conhecidas" acima (sugestão de ordem por valor/esforço:
-   `assign-to-constant`, depois `cannot-infer`, depois neutro do `try` por tipo, depois índice de
-   tupla constante, depois `_init`/ordem de inicialização, depois nomes privados).
+   `cannot-infer`, depois neutro do `try` por tipo, depois índice de tupla constante, depois
+   `_init`/ordem de inicialização, depois nomes privados). `assign-to-constant` já foi fechado
+   (ver "Status atual").
 2. Escrever **primeiro** o teste — milestone em `tests/codegen/milestones/` (a suíte só cresce) ou
    unitário em `src/codegen/types.rs`/`tests/codegen_tests.rs` — e confirmar que ele falha.
 3. Implementar até o gate voltar a `TUDO OK`, remover a linha correspondente da lista de

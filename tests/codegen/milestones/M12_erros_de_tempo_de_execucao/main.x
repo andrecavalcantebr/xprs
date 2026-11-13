@@ -7,7 +7,7 @@ _main = fn(args){
   println(string(c));
   [d, xd] = try(fill([-1, 0]));
   println(string(d));
-  [e, xe] = try(9223372036854775807 + 1);
-  println(string(e));
+  [f, xf] = try(9223372036854775807 + 1);
+  println(string(f));
   0;
 };

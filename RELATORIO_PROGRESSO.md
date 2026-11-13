@@ -315,9 +315,10 @@ vinculando `libxpr_rt.rlib` (compilada sob demanda e cacheada em `xpr_rt/target/
 1. **`cannot-infer` não é emitido.** Funções sem anotação no parâmetro recebem `Ty::Any` em vez de
    falhar, e a especialização de genéricos (Seção 4.10) não gera instâncias separadas. Programas
    que a spec rejeitaria com `cannot-infer` hoje passam.
-2. **`assign-to-constant` não é emitido.** Atribuir a `pi`, `E`, `true`, `false`, `NaN` ou `INF`
-   não é detectado (a atribuição simplesmente cria uma variável local de mesmo nome, como Rust
-   faria com um shadowing — não é o comportamento da spec).
+2. **`assign-to-constant` — FECHADO na subetapa pós-Codegen** (ver seção "Pós-Codegen:
+   fechamento de `assign-to-constant`" abaixo). Constantes predefinidas e nomes de nível
+   superior (dentro de funções) passaram a ser somente leitura, com `PI`/`e` adicionados como
+   aliases da Seção 6.
 3. **Neutro do `try` aproximado pela forma sintática**, conforme explicado acima; para tipos
    compostos ou variáveis o neutro cai em `0`, que pode divergir do neutro do tipo.
 4. **`format` científico** usa `significant - 1` dígitos após o ponto quando `significant < 15`,
@@ -362,3 +363,57 @@ tempo de execução capturados, M13 exemplos da spec (cópias, indexação múlt
 negação de lista).
 
 `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).
+
+---
+
+## Pós-Codegen: fechamento de `assign-to-constant` (Seção 6)
+
+Primeira limitação fechada depois do encerramento formal da etapa, pelo processo registrado em
+`ESTADO_DO_PROJETO.md`: teste primeiro, implementação depois, gate `TUDO OK` obrigatório.
+
+### Atividades realizadas
+
+* **Testes primeiro (TDD)**: 5 unitários novos em `src/codegen/types.rs` (constantes predefinidas
+  somente leitura no nível de módulo **e** dentro de funções; nomes de nível superior somente
+  leitura dentro de funções; desestruturação com constante/global no padrão; tipos de
+  `pi`/`PI`/`e`/`E`/`true`/`false`) + 3 de integração em `tests/codegen_tests.rs` (2 de erro via
+  `emit_err`, 1 de não-regressão da redefinição no nível de módulo). Confirmados falhando antes
+  da implementação (5 falhas, 21 ok).
+* **Implementação** (toda em `src/codegen/types.rs`, + 2 linhas em `src/codegen/mod.rs`):
+  * `predefined_constant(name) -> Option<Ty>` — fonte única das constantes da Seção 6
+    (`true`/`false` bool; `NaN`/`INF`/`pi`/`PI`/`e`/`E` real), usada por `check_name`,
+    `check_definition` e `assign`;
+  * `check_definition` rejeita no nível de módulo definição cujo nome seja constante predefinida
+    (`pi = 3.14;` → `assign-to-constant`, o exemplo canônico da spec);
+  * `assign` virou *local-first*: escopos locais (parâmetros e primeiras atribuições — Seção 4.5)
+    reatribuem livremente; fora deles, constante predefinida → `assign-to-constant` sempre, e
+    nome de nível superior → `assign-to-constant` quando `scopes.len() > 1` (dentro de corpo de
+    função/bloco);
+  * `CONSTANTS` do emissor ganhou os aliases `PI` e `e` (a Seção 6 aceita ambos os grafões de
+    `pi` e `E`; antes nem sequer eram reconhecidos como constantes).
+* **Correção de conformidade no M12** (incidente AGENTS.md 3.3.1, reportado ao usuário): o
+  milestone usava `e` como variável local em `[e, xe] = try(9223372036854775807 + 1);`, mas a
+  Seção 6 reserva `e` como o número de Euler. Renomeado para `f`/`xf` — a saída do programa não
+  muda (imprime o valor, não o nome) e o que o milestone verifica (captura de overflow) é o
+  mesmo. Não é mascaramento: é o teste que conflitava com a spec canônica.
+
+### Decisões de design
+
+* **Redefinição no nível de módulo continua válida** (Seção 4.5, exemplo das "variáveis salvas":
+  `c = 9; … c = 19;`). `assign-to-constant` só se aplica (a) a constantes predefinidas em
+  qualquer escopo e (b) a nomes de nível superior **dentro de funções** (Seção 6: "somente
+  leitura para todas as funções").
+* **`scopes.len() > 1` ⇔ dentro de corpo de função/bloco**: no nível de módulo só existem
+  `Definition`s (blocos/`iif`/`for` não são `const_expr`), então o teste de profundidade da
+  pilha de escopos separa exatamente os dois regimes sem flag extra.
+* **`predefined_constant` como fonte única** elimina a duplicação que existia entre o `match` de
+  `check_name` e a tabela `CONSTANTS` do emissor (que agora cobre `PI`/`e` também).
+
+### Resultado dos testes
+
+```
+cargo test --lib codegen::types   → 26 passed; 0 failed (21 antigos + 5 novos)
+cargo test --test codegen_tests   → 41 passed; 0 failed (38 antigos + 3 novos)
+./scripts/run-all-tests.sh        → TUDO OK (exit 0)
+milestones                        → 14/14 OK (M12 com o rename de conformidade)
+```

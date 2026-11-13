@@ -154,6 +154,19 @@ fn unify_argument(param: &Ty, arg: &Ty) -> Unify {
     }
 }
 
+/// Constantes predefinidas da Seção 6 — vinculações somente leitura.
+///
+/// Atribuir a qualquer uma delas é `assign-to-constant` em tempo de compilação, em qualquer
+/// escopo (`pi = 3.14` é o exemplo canônico da spec). Cada uma tem tipo fixo: `true`/`false`
+/// são bools; `NaN`, `INF`, `pi`/`PI` e `e`/`E` são reais.
+fn predefined_constant(name: &str) -> Option<Ty> {
+    match name {
+        "true" | "false" => Some(Ty::Bool),
+        "NaN" | "INF" | "pi" | "PI" | "e" | "E" => Some(Ty::Real),
+        _ => None,
+    }
+}
+
 /// Verificador de um módulo.
 pub struct TypeChecker<'a> {
     file: &'a str,
@@ -196,6 +209,16 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn check_definition(&mut self, def: &Definition) -> Result<Ty, SemaError> {
+        if predefined_constant(&def.name).is_some() {
+            return Err(self.error(
+                DiagCode::AssignToConstant,
+                def.span,
+                format!(
+                    "{} é uma constante predefinida (Seção 6) e é somente leitura",
+                    def.name
+                ),
+            ));
+        }
         self.current = def.name.clone();
         match &def.initializer {
             Initializer::FnDef(fn_def) => self.check_fn(fn_def, Some(&def.name)),
@@ -222,9 +245,12 @@ impl<'a> TypeChecker<'a> {
     /// Registra a atribuição de `ty` a `name`, unificando com o tipo já existente no escopo (uma
     /// variável tem **um único tipo** no seu escopo — Seção 4.7).
     fn assign(&mut self, name: &str, ty: Ty, span: Span) -> Result<Ty, SemaError> {
-        match self.lookup(name) {
-            Some(existing) => match unify(&existing, &ty) {
+        // Escopos locais primeiro: uma variável local (parâmetro ou primeira atribuição no
+        // corpo — Seção 4.5) pode ser reatribuída livremente, mesmo sombreando um nome externo.
+        if let Some(existing) = self.scopes.iter().rev().find_map(|scope| scope.get(name)) {
+            return match unify(existing, &ty) {
                 Unify::Ok(unified) => {
+                    let unified = unified.clone();
                     self.declare(name, unified.clone());
                     Ok(unified)
                 }
@@ -234,12 +260,30 @@ impl<'a> TypeChecker<'a> {
                     format!("a variável {} não pode ser {} e {} ({})", name, existing.name(), ty.name(), detail),
                 )),
                 Unify::Size(detail) => Err(self.error(DiagCode::SizeMismatch, span, detail)),
-            },
-            None => {
-                self.declare(name, ty.clone());
-                Ok(ty)
-            }
+            };
         }
+        if predefined_constant(name).is_some() {
+            return Err(self.error(
+                DiagCode::AssignToConstant,
+                span,
+                format!("{} é uma constante predefinida (Seção 6) e é somente leitura", name),
+            ));
+        }
+        // `scopes.len() > 1` ⇔ dentro de um corpo de função/bloco: lá, nomes de nível superior
+        // são somente leitura (Seção 6); no nível de módulo a redefinição continua válida
+        // (Seção 4.5, exemplo das "variáveis salvas").
+        if self.scopes.len() > 1 && self.globals.contains_key(name) {
+            return Err(self.error(
+                DiagCode::AssignToConstant,
+                span,
+                format!(
+                    "{} é uma definição de nível superior, somente leitura dentro de funções (Seção 6)",
+                    name
+                ),
+            ));
+        }
+        self.declare(name, ty.clone());
+        Ok(ty)
     }
 
     fn error(&self, code: DiagCode, span: Span, detail: impl Into<String>) -> SemaError {
@@ -437,11 +481,10 @@ impl<'a> TypeChecker<'a> {
         if self.globals.contains_key(name) {
             return Ok(Ty::Any);
         }
-        match name {
-            "true" | "false" => Ok(Ty::Bool),
-            "NaN" | "INF" | "pi" | "E" => Ok(Ty::Real),
-            _ if BUILTINS.contains(&name) => Ok(Ty::Any),
-            _ => Err(self.error(
+        match predefined_constant(name) {
+            Some(ty) => Ok(ty),
+            None if BUILTINS.contains(&name) => Ok(Ty::Any),
+            None => Err(self.error(
                 DiagCode::UndefinedIdentifier,
                 span,
                 format!("{}", name),
@@ -1024,5 +1067,101 @@ mod tests {
             check_err("_main = fn(x){ v = [1, 2]; v[\"a\"]; };"),
             DiagCode::TypeMismatch
         );
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // assign-to-constant (Seção 6): constantes predefinidas e nomes de nível superior
+    // -----------------------------------------------------------------------------------------
+
+    #[test]
+    fn constantes_predefinidas_sao_somente_leitura_no_nivel_do_modulo() {
+        // Seção 6: "Atribuir a uma constante predefinida é um erro de compilação". O exemplo
+        // canônico é `pi = 3.14`; a regra vale para todas as constantes, em qualquer escopo.
+        for (name, value) in [
+            ("true", "1"),
+            ("false", "0"),
+            ("NaN", "0.0"),
+            ("INF", "1.0"),
+            ("pi", "3.14"),
+            ("PI", "3.14"),
+            ("e", "2.7"),
+            ("E", "2.7"),
+        ] {
+            assert_eq!(
+                check_err(&format!("{} = {};", name, value)),
+                DiagCode::AssignToConstant,
+                "atribuição a {} deveria ser assign-to-constant",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn constante_predefinida_nao_pode_ser_atribuida_dentro_de_funcao() {
+        assert_eq!(
+            check_err("_main = fn(x){ pi = 3.14; };"),
+            DiagCode::AssignToConstant
+        );
+        assert_eq!(
+            check_err("_main = fn(x){ true = false; };"),
+            DiagCode::AssignToConstant
+        );
+    }
+
+    #[test]
+    fn nome_de_nivel_superior_e_somente_leitura_dentro_de_funcao() {
+        // Seção 6: as definições de nível superior "são definidas uma vez, avaliadas pelo
+        // compilador e somente leitura para todas as funções".
+        assert_eq!(
+            check_err("y = 1; _main = fn(a){ y = 2; };"),
+            DiagCode::AssignToConstant
+        );
+    }
+
+    #[test]
+    fn nome_de_nivel_superior_continua_legivel_dentro_de_funcao() {
+        // Ler um nome de nível superior dentro de função é normal (é assim que `c = 9;
+        // f = fn(x){ x + c; };` funciona — Seção 4.5).
+        let types = check("y = 1; _main = fn(a){ z = y + 1; z; };").expect("válido");
+        assert!(types.contains_key("_main"));
+    }
+
+    #[test]
+    fn redefinicao_no_nivel_do_modulo_continua_valida() {
+        // Seção 4.5 (exemplo das "variáveis salvas"): `c = 19;` no nível de módulo **redefine**
+        // a constante do módulo; isso não é atribuição dentro de função.
+        let types =
+            check("c = 9; f = fn(x){ x + c; }; c = 19; g = fn(x){ x + c; };").expect("válido");
+        assert!(types.contains_key("g"));
+    }
+
+    #[test]
+    fn parametros_e_locais_continuam_atribuiveis() {
+        // Parâmetro e local da função são variáveis comuns (Seção 4.5): podem ser reatribuídos.
+        let types = check("_main = fn(x){ x = x + 1; v = 2; v = 3; x; };").expect("válido");
+        assert!(types.contains_key("_main"));
+    }
+
+    #[test]
+    fn padrao_de_lista_com_constante_ou_global_e_assign_to_constant() {
+        // A regra vale folha a folha em desestruturações, não só em alvos simples.
+        assert_eq!(
+            check_err("_main = fn(x){ [pi, v] = [1.0, 2]; };"),
+            DiagCode::AssignToConstant
+        );
+        assert_eq!(
+            check_err("y = 1; _main = fn(x){ [y, v] = [1, 2]; };"),
+            DiagCode::AssignToConstant
+        );
+    }
+
+    #[test]
+    fn constantes_predefinidas_tem_tipo_correto() {
+        // Seção 6: `pi`/`PI`/`e`/`E` são reais (os dois grafões de cada são aceitos);
+        // `true`/`false` são bools.
+        let types = check("r = pi + PI + e + E;").expect("válido");
+        assert_eq!(types["r"], Ty::Real);
+        let types = check("b = true == false;").expect("válido");
+        assert_eq!(types["b"], Ty::Bool);
     }
 }

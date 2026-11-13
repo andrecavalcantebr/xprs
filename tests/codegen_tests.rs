@@ -202,6 +202,32 @@ fn emit_atribuicao_a_nome_capturado_e_erro() {
 }
 
 #[test]
+fn emit_atribuicao_a_constante_predefinida_e_erro() {
+    // Seção 6: `pi = 3.14` é inválido em qualquer escopo — erro de compilação, no primeiro
+    // erro, antes de qualquer emissão.
+    let (code, _) = emit_err("pi = 3.14;\n_main = fn(x){ 0; };");
+    assert_eq!(code, DiagCode::AssignToConstant);
+    let (code, _) = emit_err("_main = fn(x){ true = false; };");
+    assert_eq!(code, DiagCode::AssignToConstant);
+}
+
+#[test]
+fn emit_atribuicao_a_global_dentro_de_funcao_e_erro() {
+    // Seção 6: nomes de nível superior são somente leitura para todas as funções.
+    let (code, _) = emit_err("y = 1;\n_main = fn(x){ y = 2; };");
+    assert_eq!(code, DiagCode::AssignToConstant);
+}
+
+#[test]
+fn emit_redefinicao_no_nivel_de_modulo_continua_valida() {
+    // Seção 4.5: redefinir no nível de módulo é legítimo (o exemplo das "variáveis salvas");
+    // a leitura dentro da função congela o valor da definição, não o nome.
+    let rust = emit("c = 9; f = fn(x){ x + c; }; c = 19; g = fn(x){ x + c; }; _main = fn(x){ g(1); };")
+        .expect("deve emitir");
+    assert!(rust.contains("pub fn _main"));
+}
+
+#[test]
 fn emit_parametro_sombreando_externo_permite_atribuicao() {
     // `h = fn(c){ c = c + 1; c; }` é válido (o parâmetro sombreia o externo).
     let rust = emit("_main = fn(args){ c = 10; h = fn(c){ c = c + 1; c; }; h(c); };")
