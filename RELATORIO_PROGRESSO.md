@@ -329,8 +329,9 @@ vinculando `libxpr_rt.rlib` (compilada sob demanda e cacheada em `xpr_rt/target/
    especificada no documento.
 5. **Índice de tupla constante — FECHADO na subetapa pós-Codegen** (ver seção "Pós-Codegen:
    fechamento do índice de tupla constante" abaixo).
-6. **`_init` e ordem de inicialização entre módulos** não foram implementados (a spec menciona,
-   mas nenhum milestone os exige ainda).
+6. **`_init` e ordem de inicialização entre módulos — FECHADO na subetapa pós-Codegen** (ver
+   seção "Pós-Codegen: fechamento de `_init` e ordem de inicialização" abaixo), com o
+   milestone M14.
 7. **Nomes privados (`_prefixo`) e `import` como statement de bloco** estão rejeitados/marcados
    como erro, mas sem a distinção "primeiras instruções do bloco mais externo do programa".
 8. **`-O`, `--rustc` e `-v` funcionam**, mas `cargo` é sempre usado para compilar a crate de
@@ -534,4 +535,44 @@ Quarta limitação fechada, mesmo processo (teste primeiro → implementação �
 cargo test --lib                → 40 passed; 0 failed
 cargo test --test codegen_tests → 47 passed; 0 failed (44 + 3 novos)
 ./scripts/run-all-tests.sh      → TUDO OK (exit 0); milestones 14/14 OK
+```
+
+---
+
+## Pós-Codegen: fechamento de `_init` e ordem de inicialização (Seção 4.1)
+
+Quinta limitação fechada, mesmo processo (teste primeiro → implementação → gate `TUDO OK`).
+
+### Atividades realizadas
+
+* **Testes primeiro (TDD)**: milestone novo **M14_init_ordem_de_inicializacao** (três módulos —
+  `a` folha, `b` que importa `a`, `main` que importa `b` e define seu próprio `_init`; espera
+  `a-init`, `b-init`, `main-init`, `main`) + 3 e2e em `tests/codegen_tests.rs` com um helper novo
+  `compile_and_run_files` (programas de múltiplos arquivos): ordem de dependência; falha do
+  `_init` não capturável (status ≠ 0, `_main` não roda, stderr relatado); módulo sem `_init`
+  inalterado. O milestone foi confirmado falhando antes da implementação.
+* **Implementação** (só `src/codegen/mod.rs`, no `emit_program`): para cada módulo com definição
+  `_init` (exceto o entry, tratado por último), emite
+  `let _ = xpr_rt::force(xpr_rt::call(<mod>::_init(), xpr_rt::Value::seq(vec![]), None));`
+  antes de `_main`. Nada no runtime mudou: `xpr_rt::force` já existia para "avaliação única, não
+  capturável" (documentado no próprio runtime desde a etapa Codegen, mas sem uso).
+
+### Decisões de design
+
+* **A ordem do carregador já é a ordem da spec**: `load_one` empilha o módulo **depois** de seus
+  imports (pós-ordem DFS), então percorrer `modules` na ordem da lista dá imports antes do
+  importador, independentes na ordem textual dos imports e o entry por último — sem ordenação
+  nova nem grafo em tempo de emissão.
+* **`force` em vez de `try`/`finish`**: `finish` encerraria o programa com o status do valor
+  retornado, mas o `_init` devolve um valor **descartado**; `force` relata apenas a falha e sai
+  com status ≠ 0, exatamente a semântica exigida ("não pode publicar estado", "não é capturável").
+* **`_init` não é privado a `_main` só por convenção**: a regra de nomes privados é limitação
+  separada; aqui o `_init` é apenas um nome que o programa gerado chama por convenção.
+
+### Resultado dos testes
+
+```
+cargo test --lib                → 40 passed; 0 failed
+cargo test --test codegen_tests → 50 passed; 0 failed (47 + 3 e2e novos)
+./scripts/run-all-tests.sh      → TUDO OK (exit 0); milestones 15/15 OK (M14 novo)
 ```

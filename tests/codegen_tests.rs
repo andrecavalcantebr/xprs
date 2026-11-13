@@ -218,6 +218,90 @@ fn emit_atribuicao_a_global_dentro_de_funcao_e_erro() {
     assert_eq!(code, DiagCode::AssignToConstant);
 }
 
+/// Compila e executa um programa de **múltiplos arquivos** (nome → fonte), devolvendo
+/// (stdout, exit code, stderr). O arquivo `main.x` é a entrada.
+fn compile_and_run_files(name: &str, files: &[(&str, &str)]) -> (String, i32, String) {
+    let dir = std::env::temp_dir().join(format!(
+        "xprc-files-{}-{}-{}",
+        std::process::id(),
+        name,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    fs::create_dir_all(&dir).expect("criar diretório temporário");
+    for (file, source) in files {
+        fs::write(dir.join(file), source).expect("escrever fonte .x");
+    }
+    let exe = dir.join(format!("{}.exe", name));
+    let compile = Command::new(env!("CARGO_BIN_EXE_xprc"))
+        .arg(dir.join("main.x"))
+        .arg("-o")
+        .arg(&exe)
+        .output()
+        .expect("executar xprc");
+    assert!(
+        compile.status.success(),
+        "xprc falhou:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&compile.stdout),
+        String::from_utf8_lossy(&compile.stderr)
+    );
+    let run = Command::new(&exe).output().expect("executar programa");
+    (
+        String::from_utf8_lossy(&run.stdout).to_string(),
+        run.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&run.stderr).to_string(),
+    )
+}
+
+#[test]
+fn e2e_init_roda_antes_do_main_na_ordem_de_dependencia() {
+    // Seção 4.1: imports em profundidade, depois o `_init` do entry, depois `_main`.
+    let (stdout, code, _) = compile_and_run_files(
+        "init_ordem",
+        &[
+            ("dep.x", "_init = fn(a){ println(\"dep\"); 0; };\n"),
+            ("main.x", "import(\"dep\");\n_init = fn(a){ println(\"entry-init\"); 0; };\n_main = fn(a){ println(\"main\"); 0; };\n"),
+        ],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "dep\nentry-init\nmain\n");
+}
+
+#[test]
+fn e2e_falha_do_init_nao_e_capturavel_e_encerra() {
+    // Seção 4.1: o `_init` roda antes de `_main`, então uma falha nele não pode ser capturada
+    // por `try` — é relatada e o processo encerra com status diferente de zero.
+    let (stdout, code, stderr) = compile_and_run_files(
+        "init_falha",
+        &[
+            ("quebrado.x", "_init = fn(a){ fail(\"init quebrou\"); };\n"),
+            ("main.x", "import(\"quebrado\");\n_main = fn(a){ println(\"nao deveria rodar\"); 0; };\n"),
+        ],
+    );
+    assert_ne!(code, 0, "falha de _init deve encerrar com status != 0");
+    assert_eq!(stdout, "", "_main não pode rodar depois de _init falhar");
+    assert!(
+        stderr.contains("fail") && stderr.contains("init quebrou"),
+        "stderr deveria relatar a falha do _init:\n{}",
+        stderr
+    );
+}
+
+#[test]
+fn e2e_modulo_sem_init_nao_muda_nada() {
+    let (stdout, code, _) = compile_and_run_files(
+        "sem_init",
+        &[
+            ("util.x", "dobro = fn(x){ x * 2; };\n"),
+            ("main.x", "import(\"util\", \"u\");\n_main = fn(a){ println(string(u.dobro(21))); 0; };\n"),
+        ],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "42\n");
+}
+
 #[test]
 fn e2e_neutro_do_try_e_escolhido_pelo_tipo_nao_pela_forma() {
     // Seção 4.9: o neutro pertence ao TIPO da expressão tentada. `s[9]` sobre uma variável

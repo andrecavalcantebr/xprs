@@ -143,6 +143,28 @@ pub fn emit_program(entry: &str, modules: &[ModuleUnit]) -> Result<String, SemaE
 
     out.push_str("fn main() {\n");
     out.push_str("    xpr_rt::run_main_with(|| {\n");
+    // Seção 4.1: os `_init` rodam uma vez, com `[]`, antes de `_main`, na ordem de dependência
+    // (imports antes do importador; módulos independentes na ordem textual dos imports; o
+    // `_init` do módulo de entrada por último). `modules` já vem em pós-ordem DFS do carregador,
+    // que é exatamente essa ordem. O resultado é descartado (o `Value` gerado pelo corpo) e uma
+    // falha aqui **não** é capturável por `try`: `force` a relata e encerra o processo.
+    for unit in modules {
+        if unit.name == entry {
+            continue;
+        }
+        if unit.ast.definitions.iter().any(|def| def.name == "_init") {
+            out.push_str(&format!(
+                "        let _ = xpr_rt::force(xpr_rt::call({}::_init(), xpr_rt::Value::seq(vec![]), None));\n",
+                rust_module_name(&unit.name)
+            ));
+        }
+    }
+    if entry_unit.ast.definitions.iter().any(|def| def.name == "_init") {
+        out.push_str(&format!(
+            "        let _ = xpr_rt::force(xpr_rt::call({}::_init(), xpr_rt::Value::seq(vec![]), None));\n",
+            entry_mod
+        ));
+    }
     out.push_str(&format!(
         "        let __entry = {}::_main();\n",
         entry_mod

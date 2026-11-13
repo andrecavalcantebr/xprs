@@ -19,6 +19,11 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
+* **Pós-Codegen: limitação "_init / ordem de inicialização" FECHADA** (Seção 4.1): cada módulo
+  com `_init` é chamado uma vez com `[]` antes de `_main`, na ordem de dependência (a pós-ordem
+  DFS do carregador: imports antes do importador, independentes na ordem textual, entry por
+  último); o resultado é descartado e uma falha é relatada e encerra — nunca capturável por
+  `try` (usa `xpr_rt::force`, que já existia). Milestone novo M14 (15 no total).
 * **Pós-Codegen: limitação "neutro do try por tipo" FECHADA** (Seção 4.9): o `TypeChecker`
   registra o tipo de cada `try` (`try_types`, por span) e o emissor escolhe o neutro por TIPO
   (int→0, real→0.0, string→"", bool→false, lista→[], tupla→posição a posição); a heurística
@@ -103,6 +108,8 @@ Documentos: `xpr-specs.md` (especificação canônica), `plano-lexer.md` e `plan
 * `param_pattern` é obrigatório (`fn()` não existe); `fn_call` só chama `qualified_name`;
   `MultiArgCall` aponta para a vírgula; `InvalidAssignmentTarget` aponta para o `=`.
 * `edition = "2021"` (toolchain instalado: 1.75.0; edition 2024 exigiria 1.85+).
+* **`_init`** (Seção 4.1): emitido no `main` gerado na ordem de `modules` (já pós-ordem DFS do
+  carregador) e chamado via `xpr_rt::call` + `xpr_rt::force`; nada mudou no runtime.
 * **Neutro do `try` por tipo** (Seção 4.9): o checker publica `try_types` (span → Ty) e o
   pipeline (`check_types` → `emit_module` → `Emitter`) o injeta; `neutral_of_ty` resolve o
   neutro e o fallback sintático só cobre `Any`.
@@ -130,19 +137,18 @@ Detalhes em `RELATORIO_PROGRESSO.md`, seção "Etapa 3 — Codegen":
    da limitação 2.
 2. Genéricos não geram instâncias especializadas (Seção 4.10) — funcionam via `Any`.
 3. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas.
-4. `_init`/ordem de inicialização entre módulos não implementados.
-5. Nomes privados (`_prefixo`) e `import` como statement de bloco sem a distinção exata da spec.
+4. Nomes privados (`_prefixo`) e `import` como statement de bloco sem a distinção exata da spec.
 
-(Fechadas: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla constante e neutro do `try` por tipo — ver seções "Pós-Codegen" do RELATORIO_PROGRESSO.md.)
+(Fechadas: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla constante, neutro do `try` por tipo e `_init`/ordem de inicialização — ver seções "Pós-Codegen" do RELATORIO_PROGRESSO.md.)
 
 ## Próxima ação concreta
 
 O processo de `AGENTS.md` (Fases 1, 2 e 3) está **completo**. Para continuar evoluindo:
 
 1. Escolher **um** item das "Limitações conhecidas" acima (sugestão de ordem por valor/esforço:
-   `_init`/ordem de inicialização, depois nomes privados — ou especialização de genéricos,
-   que fecha o restante de `cannot-infer`). Já fechados: `assign-to-constant`, `cannot-infer`
-   de recursivas, índice de tupla constante e neutro do `try` por tipo (ver "Status atual").
+   nomes privados — ou especialização de genéricos, que fecha o restante de `cannot-infer`).
+   Já fechados: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla constante,
+   neutro do `try` por tipo e `_init`/ordem de inicialização (ver "Status atual").
 2. Escrever **primeiro** o teste — milestone em `tests/codegen/milestones/` (a suíte só cresce) ou
    unitário em `src/codegen/types.rs`/`tests/codegen_tests.rs` — e confirmar que ele falha.
 3. Implementar até o gate voltar a `TUDO OK`, remover a linha correspondente da lista de
