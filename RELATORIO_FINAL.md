@@ -225,7 +225,7 @@ está listada aqui e em `ESTADO_DO_PROJETO.md`, com a indicação de como fechá
 | Planejamento | Concluída | `plano-lexer.md`, `plano-parser.md`, `plano-codegen.md`, `plano-testes-codegen.md`, ambiente Cargo + Git |
 | Lexer | Concluída | 52 unitários, 12/12 fixtures, `scripts/run-lexer-tests.sh` = 0 |
 | Parser | Concluída | 80 unitários (A–J), 16/16 fixtures, `scripts/run-parser-tests.sh` = 0 |
-| Codegen | Concluída | 45 unitários + 53 de integração, 15/15 milestones, `scripts/run-all-tests.sh` → `TUDO OK` (o gate agora inclui `cargo test`; números incluem os fechamentos pós-etapa: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla, neutro do `try`, `_init`, nomes privados, especialização de genéricos) |
+| Codegen | Concluída | 45 unitários + 4 do binário + 53 de integração, 15/15 milestones, `scripts/run-all-tests.sh` → `TUDO OK` (o gate agora inclui `cargo test`; números incluem os fechamentos pós-etapa: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla, neutro do `try`, `_init`, nomes privados, especialização de genéricos) |
 
 O compilador está funcional de ponta a ponta: `xprc testes/codegen/milestones/M4_closures/main.x -o
 prog && ./prog` imprime `120` e `999`, como a Seção 4.5 da especificação exige.

@@ -491,24 +491,69 @@ fn ensure_runtime(
 }
 
 fn find_rlib(target: &Path) -> Option<PathBuf> {
-    let deps = target.join("debug").join("deps");
-    let entries = fs::read_dir(&deps).ok()?;
+    // O layout do `cargo build` de uma crate-lib sem dependências variou entre versões:
+    //   - `debug/deps/libxpr_rt-<hash>.rlib`  (layout "com hash", usado por versões antigas)
+    //   - `debug/libxpr_rt.rlib`              (layout canônico, cargo ≥ 1.80)
+    //   - `debug/build/xpr_rt/<hash>/out/libxpr_rt-<hash>.rlib` (cópia do artefato)
+    // Procuramos em toda a subárvore de `debug/` para não depender do layout, preferindo o
+    // artefato canônico e, entre os demais, o mais recente.
+    let debug = target.join("debug");
+    let canonical = debug.join(format!("lib{}.rlib", RUNTIME_CRATE));
+    if canonical.is_file() {
+        return Some(canonical);
+    }
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+    collect_rlibs(&debug, 0, &mut best);
+    best.map(|(_, path)| path)
+}
+
+/// Nome da crate de runtime procurada por [`find_rlib`].
+const RUNTIME_CRATE: &str = "xpr_rt";
+
+/// Coleta `.rlib` da crate de runtime sob `dir`, descendo até `MAX_RLIB_DEPTH` níveis (evita
+/// varrer `incremental/`, que pode ser grande, e protege contra links simbólicos).
+fn collect_rlibs(
+    dir: &Path,
+    depth: usize,
+    best: &mut Option<(std::time::SystemTime, PathBuf)>,
+) {
+    const MAX_RLIB_DEPTH: usize = 5;
+    if depth > MAX_RLIB_DEPTH {
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
     for entry in entries.flatten() {
         let path = entry.path();
-        let name = path.file_name()?.to_string_lossy().to_string();
-        if name.starts_with("libxpr_rt-") && name.ends_with(".rlib") {
-            let modified = entry.metadata().ok()?.modified().ok()?;
-            if best
-                .as_ref()
-                .map(|(current, _)| modified > *current)
-                .unwrap_or(true)
-            {
-                best = Some((modified, path));
-            }
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(_) => continue,
+        };
+        if file_type.is_dir() {
+            collect_rlibs(&path, depth + 1, best);
+            continue;
+        }
+        let name = match path.file_name() {
+            Some(name) => name.to_string_lossy().to_string(),
+            None => continue,
+        };
+        if !name.starts_with(&format!("lib{}-", RUNTIME_CRATE)) || !name.ends_with(".rlib") {
+            continue;
+        }
+        let modified = match entry.metadata().and_then(|meta| meta.modified()) {
+            Ok(modified) => modified,
+            Err(_) => continue,
+        };
+        if best
+            .as_ref()
+            .map(|(current, _)| modified > *current)
+            .unwrap_or(true)
+        {
+            *best = Some((modified, path));
         }
     }
-    best.map(|(_, path)| path)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -621,4 +666,75 @@ fn dump_types(modules: &[ModuleUnit]) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_rlib;
+
+    /// Cria um diretório temporário isolado por nome de teste.
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "xprc-find-rlib-{}-{}-{}",
+            std::process::id(),
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).expect("criar diretório temporário");
+        dir
+    }
+
+    #[test]
+    fn find_rlib_aceita_o_layout_canonico() {
+        // cargo ≥ 1.80: `debug/libxpr_rt.rlib`, sem `deps/`. Era o caso que quebrava com a
+        // atualização do toolchain (o código antigo só olhava `debug/deps`).
+        let target = temp_dir("canonico");
+        let debug = target.join("debug");
+        std::fs::create_dir_all(&debug).unwrap();
+        std::fs::write(debug.join("libxpr_rt.rlib"), b"rlib").unwrap();
+
+        let found = find_rlib(&target).expect("deveria achar o .rlib canônico");
+        assert_eq!(found, debug.join("libxpr_rt.rlib"));
+        let _ = std::fs::remove_dir_all(&target);
+    }
+
+    #[test]
+    fn find_rlib_aceita_o_layout_com_hash_em_deps() {
+        // Layout antigo: `debug/deps/libxpr_rt-<hash>.rlib`. Precisa continuar funcionando.
+        let target = temp_dir("deps");
+        let deps = target.join("debug").join("deps");
+        std::fs::create_dir_all(&deps).unwrap();
+        std::fs::write(deps.join("libxpr_rt-0123456789abcdef.rlib"), b"rlib").unwrap();
+
+        let found = find_rlib(&target).expect("deveria achar o .rlib em deps/");
+        assert!(found.ends_with("libxpr_rt-0123456789abcdef.rlib"));
+        let _ = std::fs::remove_dir_all(&target);
+    }
+
+    #[test]
+    fn find_rlib_prefere_o_canonico_ao_hash() {
+        let target = temp_dir("prefere");
+        let debug = target.join("debug");
+        let deps = debug.join("deps");
+        std::fs::create_dir_all(&deps).unwrap();
+        std::fs::write(debug.join("libxpr_rt.rlib"), b"canonico").unwrap();
+        std::fs::write(deps.join("libxpr_rt-aaa.rlib"), b"hash").unwrap();
+
+        assert_eq!(find_rlib(&target).unwrap(), debug.join("libxpr_rt.rlib"));
+        let _ = std::fs::remove_dir_all(&target);
+    }
+
+    #[test]
+    fn find_rlib_ignora_crates_com_nome_parecido() {
+        let target = temp_dir("parecido");
+        let debug = target.join("debug");
+        std::fs::create_dir_all(&debug).unwrap();
+        std::fs::write(debug.join("libxpr_rt_extra-abc.rlib"), b"x").unwrap();
+
+        assert!(find_rlib(&target).is_none(), "não pode casar crate de nome parecido");
+        let _ = std::fs::remove_dir_all(&target);
+    }
 }

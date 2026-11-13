@@ -19,6 +19,16 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
+* **Toolchain: Rust 1.100.0 via rustup** (era 1.75.0 do `.deb` do Ubuntu, removido com
+  `apt remove --purge rustc cargo` + purge dos órfãos `libstd-rust*`). Sem duplicata: `type -a
+  rustc cargo` → só `~/.cargo/bin/*`. `edition = "2021"` inalterado (nada no projeto exigia 1.75).
+  **Bug de portabilidade corrigido**: `find_rlib` só procurava `debug/deps/libxpr_rt-<hash>.rlib`
+  e no cargo ≥ 1.80 o artefato canônico é `debug/libxpr_rt.rlib` (sem `deps/`), então o runtime
+  "não era encontrado" (16 e2e falhavam). Agora aceita os dois layouts, prefere o canônico e
+  varre a subárvore com limite de profundidade; 4 unitários novos cobrem os layouts.
+  Nota operacional: `cargo clean` na raiz **não** limpa `xpr_rt/target/xprc-rt` (cache do
+  runtime) — ao trocar de toolchain, remova esse diretório também, senão o `.rlib` antigo gera
+  `E0786: invalid metadata`.
 * **Pós-Codegen: limitação "especialização de genéricos" FECHADA** (Seção 4.10): `fn(x){ x + 1; }`
   chamada com string agora é `type-mismatch` — o corpo é re-verificado por instância
   (`instantiate`, com o parâmetro ligado ao tipo concreto do argumento) e o **resultado** da

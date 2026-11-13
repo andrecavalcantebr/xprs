@@ -15,7 +15,7 @@
 //! para não pagar o custo de compilação repetidas vezes.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use xprc::codegen::{emit_program, ModuleUnit};

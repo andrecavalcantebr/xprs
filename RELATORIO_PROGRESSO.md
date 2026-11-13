@@ -661,3 +661,44 @@ cargo test --lib                → 45 passed; 0 failed
 cargo test --test codegen_tests → 53 passed; 0 failed (52 + 1 novo)
 ./scripts/run-all-tests.sh      → TUDO OK (exit 0); milestones 15/15 OK — agora rodando cargo test
 ```
+
+---
+
+## Atualização do toolchain: Rust 1.75 → 1.100 (rustup, sem duplicata)
+
+### Atividades realizadas
+
+* **Remoção do toolchain do sistema** (feita pelo usuário, no host): `apt remove --purge rustc
+  cargo` e purge dos órfãos `libgit2-1.7`, `libhttp-parser2.9`, `libssh2-1t64`, `libstd-rust-1.75`,
+  `libstd-rust-dev` (264 MB). Confirmado: `dpkg -l | grep -i rust` limpo e `/usr/lib/rustlib`
+  ausente.
+* **Instalação via rustup** em `~/.cargo`: `rustc 1.100.0`, `cargo 1.100.0`. `type -a rustc
+  cargo` aponta **apenas** para `~/.cargo/bin/*` — sem duplicata, objetivo da troca.
+* **Revalidação**: o build inicial falhou com 16 e2e (`E0786: invalid metadata files for crate
+  xpr_rt`), porque o cache do runtime em `xpr_rt/target/xprc-rt` ainda era da 1.75 e o `cargo
+  clean` da raiz não o alcança.
+
+### Bug de portabilidade encontrado (e corrigido)
+
+Depois de limpar o cache, o erro mudou para `libxpr_rt.rlib não encontrada após o build`. Causa:
+`find_rlib` só olhava `debug/deps/libxpr_rt-<hash>.rlib`; no cargo ≥ 1.80 a crate-lib sem
+dependências é emitida em `debug/libxpr_rt.rlib` (canônico) e a cópia com hash vai para
+`debug/build/xpr_rt/<hash>/out/` — **`debug/deps/` não existe**. Ou seja: o projeto não era
+portável entre versões de cargo, e o gate só passava porque a 1.75 produzia o layout antigo.
+
+Correção em `src/main.rs`: `find_rlib` retorna o artefato canônico quando existe e, senão, varre
+a subárvore de `debug/` com profundidade limitada (5) coletando `libxpr_rt-*.rlib` (o mais
+recente vence). Não segue links simbólicos nem casa nomes parecidos (`libxpr_rt_extra-*`).
+4 unitários novos em `main.rs` cobrem: layout canônico, layout com hash, preferência pelo
+canônico e rejeição de crate de nome parecido.
+
+### Resultado dos testes (na 1.100)
+
+```
+cargo test (lib)                 → 45 passed; 0 failed
+cargo test (bin xprc)            → 4 passed; 0 failed (novos)
+cargo test --test codegen_tests  → 53 passed; 0 failed
+./scripts/run-all-tests.sh       → TUDO OK; milestones 15/15 OK
+```
+
+Nenhuma mudança de `Cargo.toml`: `edition = "2021"` continua válida na 1.100.
