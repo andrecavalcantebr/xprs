@@ -320,8 +320,9 @@ vinculando `libxpr_rt.rlib` (compilada sob demanda e cacheada em `xpr_rt/target/
    fechamento de `assign-to-constant`" abaixo). Constantes predefinidas e nomes de nível
    superior (dentro de funções) passaram a ser somente leitura, com `PI`/`e` adicionados como
    aliases da Seção 6.
-3. **Neutro do `try` aproximado pela forma sintática**, conforme explicado acima; para tipos
-   compostos ou variáveis o neutro cai em `0`, que pode divergir do neutro do tipo.
+3. **Neutro do `try` — FECHADO na subetapa pós-Codegen** (ver seção "Pós-Codegen: fechamento
+   do neutro do `try` por tipo" abaixo): o neutro agora é escolhido pelo tipo; o fallback
+   sintático só cobre `Any` (genéricos).
 4. **`format` científico** usa `significant - 1` dígitos após o ponto quando `significant < 15`,
    e 2 quando é o padrão 15. O exemplo `0.001 → 1.00e-3` da spec é batido (milestone M11), mas a
    regra geral de "quantos significativos aparecem na mantissa" não está inteiramente
@@ -497,5 +498,40 @@ Terceira limitação fechada, mesmo processo (teste primeiro → implementação
 ```
 cargo test --lib                → 40 passed; 0 failed (inclui 37 de codegen::types e 3 de diag)
 cargo test --test codegen_tests → 44 passed; 0 failed (42 + 2 novos)
+./scripts/run-all-tests.sh      → TUDO OK (exit 0); milestones 14/14 OK
+```
+
+---
+
+## Pós-Codegen: fechamento do neutro do `try` por tipo (Seção 4.9)
+
+Quarta limitação fechada, mesmo processo (teste primeiro → implementação → gate `TUDO OK`).
+
+### Atividades realizadas
+
+* **Testes primeiro (TDD)**: e2e `compile_and_run` provando o bug real — `try(s[9])` com `s`
+  string imprimia `0` (neutro int da heurística) em vez da string vazia; teste de emissão do
+  neutro **posicional** de tupla (`[int, string]` → `[0, ""]`); regressão de genérico
+  (`Any` mantém fallback sintático e continua compilando). Confirmados: 2 falhas antes da
+  implementação.
+* **Implementação**: `TypeChecker` ganhou `try_types: HashMap<span, Ty>` (preenchido no braço
+  `Expr::Try`); `check_types` (fase 2) coleta por módulo e `emit_program` injeta no `Emitter`;
+  `neutral_of_ty` resolve o neutro por tipo (tupla = posição a posição); `neutral_expr`
+  consulta o mapa primeiro e só recai na heurística sintática sem tipo conhecido.
+
+### Decisões de design
+
+* **Canal checker→emissor por span, não re-inferência**: duplicar a inferência no emissor seria
+  a fonte de verdades dupla que o projeto evita desde o catálogo; o span da ocorrência de
+  `try` é único por módulo e serve de chave barata.
+* **`Any` recua na heurística**: genéricos não têm tipo concreto até a especialização
+  (limitação em aberto); a heurística sintática permanece como fallback para não rejeitar
+  programas válidos.
+
+### Resultado dos testes
+
+```
+cargo test --lib                → 40 passed; 0 failed
+cargo test --test codegen_tests → 47 passed; 0 failed (44 + 3 novos)
 ./scripts/run-all-tests.sh      → TUDO OK (exit 0); milestones 14/14 OK
 ```

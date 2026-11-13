@@ -19,6 +19,11 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
+* **Pós-Codegen: limitação "neutro do try por tipo" FECHADA** (Seção 4.9): o `TypeChecker`
+  registra o tipo de cada `try` (`try_types`, por span) e o emissor escolhe o neutro por TIPO
+  (int→0, real→0.0, string→"", bool→false, lista→[], tupla→posição a posição); a heurística
+  sintática anterior devolvia `0` para variáveis — `try(s[9])` com `s` string entregava
+  `[false, 0]` em vez de `[false, ""]`. `Any` (genérico) mantém o fallback sintático.
 * **Pós-Codegen: limitação "índice de tupla constante" FECHADA** (Seção 4.8): índice de tupla
   precisa ser literal int — calculado é `type-mismatch` em compilação; constante fora do limite
   é `index-out-of-range` em compilação; e `t[i]` devolve o tipo da **posição** indexada (antes
@@ -98,6 +103,9 @@ Documentos: `xpr-specs.md` (especificação canônica), `plano-lexer.md` e `plan
 * `param_pattern` é obrigatório (`fn()` não existe); `fn_call` só chama `qualified_name`;
   `MultiArgCall` aponta para a vírgula; `InvalidAssignmentTarget` aponta para o `=`.
 * `edition = "2021"` (toolchain instalado: 1.75.0; edition 2024 exigiria 1.85+).
+* **Neutro do `try` por tipo** (Seção 4.9): o checker publica `try_types` (span → Ty) e o
+  pipeline (`check_types` → `emit_module` → `Emitter`) o injeta; `neutral_of_ty` resolve o
+  neutro e o fallback sintático só cobre `Any`.
 * **Índice de tupla** (Seção 4.8): literal int obrigatório; `Diagnostic::render_as(phase)`
   separa a fase de quem reporta (compilação × runtime) da severidade da entrada do catálogo.
 * **`cannot-infer` de recursivas** (Seção 4.10): `result_calls_self` faz análise sintática
@@ -121,22 +129,20 @@ Detalhes em `RELATORIO_PROGRESSO.md`, seção "Etapa 3 — Codegen":
    casos de genérico (uso como valor sem contexto; `apply` com `[]`) dependem da especialização
    da limitação 2.
 2. Genéricos não geram instâncias especializadas (Seção 4.10) — funcionam via `Any`.
-3. Neutro do `try` aproximado pela forma sintática da expressão.
-4. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas.
-5. `_init`/ordem de inicialização entre módulos não implementados.
-6. Nomes privados (`_prefixo`) e `import` como statement de bloco sem a distinção exata da spec.
+3. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas.
+4. `_init`/ordem de inicialização entre módulos não implementados.
+5. Nomes privados (`_prefixo`) e `import` como statement de bloco sem a distinção exata da spec.
 
-(Fechadas: `assign-to-constant`, `cannot-infer` de recursivas e índice de tupla constante — ver seções "Pós-Codegen" do RELATORIO_PROGRESSO.md.)
+(Fechadas: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla constante e neutro do `try` por tipo — ver seções "Pós-Codegen" do RELATORIO_PROGRESSO.md.)
 
 ## Próxima ação concreta
 
 O processo de `AGENTS.md` (Fases 1, 2 e 3) está **completo**. Para continuar evoluindo:
 
 1. Escolher **um** item das "Limitações conhecidas" acima (sugestão de ordem por valor/esforço:
-   neutro do `try` por tipo, depois `_init`/ordem de inicialização, depois nomes privados —
-   ou especialização de genéricos, que fecha o restante de `cannot-infer`). Já fechados:
-   `assign-to-constant`, `cannot-infer` de recursivas e índice de tupla constante (ver "Status
-   atual").
+   `_init`/ordem de inicialização, depois nomes privados — ou especialização de genéricos,
+   que fecha o restante de `cannot-infer`). Já fechados: `assign-to-constant`, `cannot-infer`
+   de recursivas, índice de tupla constante e neutro do `try` por tipo (ver "Status atual").
 2. Escrever **primeiro** o teste — milestone em `tests/codegen/milestones/` (a suíte só cresce) ou
    unitário em `src/codegen/types.rs`/`tests/codegen_tests.rs` — e confirmar que ele falha.
 3. Implementar até o gate voltar a `TUDO OK`, remover a linha correspondente da lista de

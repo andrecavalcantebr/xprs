@@ -219,6 +219,40 @@ fn emit_atribuicao_a_global_dentro_de_funcao_e_erro() {
 }
 
 #[test]
+fn e2e_neutro_do_try_e_escolhido_pelo_tipo_nao_pela_forma() {
+    // Seção 4.9: o neutro pertence ao TIPO da expressão tentada. `s[9]` sobre uma variável
+    // string falha em execução e o par [false, T] tem de trazer a string vazia — a heurística
+    // sintática anterior devolvia `0` (int) para qualquer variável.
+    let (stdout, code, _) = compile_and_run(
+        "neutro_string",
+        "_main = fn(args){\n  s = \"abc\";\n  [ok, v] = try(s[9]);\n  println(string(v));\n  0;\n};\n",
+    );
+    assert_eq!(code, 0, "stderr inesperado");
+    assert_eq!(stdout, "\n", "o neutro de string deveria ser a string vazia");
+}
+
+#[test]
+fn emit_neutro_de_tupla_e_posicao_a_posicao() {
+    // Tupla `[int, string]` → neutro `[0, ""]` (posição a posição), não `[]` nem `0`.
+    let rust = emit("_main = fn(args){ t = [1, \"a\"]; [ok, v] = try(t); 0; };").expect("emissão");
+    assert!(
+        rust.contains(
+            "Value::Bool(false), xpr_rt::Value::seq(vec![xpr_rt::Value::Int(0), xpr_rt::Value::string(\"\")])"
+        ),
+        "neutro de tupla deveria ser posicional:\n{}",
+        rust
+    );
+}
+
+#[test]
+fn emit_neutro_de_tipo_generico_continua_compilando() {
+    // Parâmetro sem anotação é `Any`: sem tipo conhecido, o emissor mantém o fallback
+    // sintático (0) — genéricos seguem válidos (especialização é limitação registrada).
+    let rust = emit("f = fn(x){ [ok, v] = try(x); v; };\n_main = fn(args){ 0; };").expect("emissão");
+    assert!(rust.contains("pub fn _main"));
+}
+
+#[test]
 fn emit_indice_de_tupla_calculado_e_type_mismatch() {
     // Seção 4.8: índice de tupla precisa ser literal int constante — verificado em compilação.
     let (code, _) = emit_err("_main = fn(x){ t = [1, \"a\"]; i = 1; t[i]; };");

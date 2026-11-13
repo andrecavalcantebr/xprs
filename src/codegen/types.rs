@@ -180,6 +180,9 @@ pub struct TypeChecker<'a> {
     current: String,
     /// Alvos pendentes de uma atribuição cujo valor é uma `fn_def` (Seção 4.5).
     pending: Vec<String>,
+    /// Tipo da expressão sob cada `try`, por span da ocorrência — o emissor usa isso para
+    /// escolher o valor neutro **por tipo** (Seção 4.9), não pela forma sintática.
+    pub try_types: HashMap<(u32, u32, u32, u32), Ty>,
 }
 
 /// O **valor de resultado** desta expressão depende de uma chamada à própria função sendo
@@ -228,6 +231,7 @@ impl<'a> TypeChecker<'a> {
             scopes: vec![HashMap::new()],
             current: String::new(),
             pending: Vec::new(),
+            try_types: HashMap::new(),
         }
     }
 
@@ -493,6 +497,10 @@ impl<'a> TypeChecker<'a> {
             }
             Expr::Try(inner, span) => {
                 let ty = self.check_expr(inner)?;
+                self.try_types.insert(
+                    (span.line_start, span.col_start, span.line_end, span.col_end),
+                    ty.clone(),
+                );
                 if ty.contains_fn() {
                     return Err(self.error(
                         DiagCode::TypeMismatch,

@@ -70,6 +70,29 @@ const CONSTANTS: &[(&str, &str)] = &[
     ("E", "Ok(xpr_rt::Value::Real(std::f64::consts::E))"),
 ];
 
+/// Valor neutro de um tipo (Seção 4.9): `None` quando não há (função) ou o tipo não é
+/// conhecido (`Any`) — o chamador recua na heurística sintática.
+fn neutral_of_ty(ty: &Ty) -> Option<String> {
+    match ty {
+        Ty::Int => Some("xpr_rt::Value::Int(0)".to_string()),
+        Ty::Real => Some("xpr_rt::Value::Real(0.0)".to_string()),
+        Ty::Str => Some("xpr_rt::Value::string(\"\")".to_string()),
+        Ty::Bool => Some("xpr_rt::Value::Bool(false)".to_string()),
+        Ty::List(_) => Some("xpr_rt::Value::seq(vec![])".to_string()),
+        Ty::Tuple(items) => {
+            let mut parts = Vec::with_capacity(items.len());
+            for item in items {
+                parts.push(neutral_of_ty(item)?);
+            }
+            Some(format!(
+                "xpr_rt::Value::seq(vec![{}])",
+                parts.join(", ")
+            ))
+        }
+        Ty::Any | Ty::Fn(_, _) => None,
+    }
+}
+
 /// Como um nome visível se resolve no código gerado.
 #[derive(Debug, Clone)]
 enum Binding {
@@ -92,7 +115,7 @@ pub struct ModuleUnit {
 
 /// Gera o código Rust completo de um programa (módulo de entrada + imports).
 pub fn emit_program(entry: &str, modules: &[ModuleUnit]) -> Result<String, SemaError> {
-    check_types(entry, modules)?;
+    let try_types = check_types(entry, modules)?;
 
     let mut out = String::new();
     out.push_str("// Gerado por xprc — não edite.\n");
@@ -100,7 +123,8 @@ pub fn emit_program(entry: &str, modules: &[ModuleUnit]) -> Result<String, SemaE
     out.push_str("use xpr_rt::{self, Value, XprResult};\n\n");
 
     for unit in modules {
-        out.push_str(&emit_module(unit)?);
+        let unit_try_types = try_types.get(&unit.name).cloned().unwrap_or_default();
+        out.push_str(&emit_module(unit, &unit_try_types)?);
         out.push('\n');
     }
 
@@ -133,7 +157,10 @@ pub fn emit_program(entry: &str, modules: &[ModuleUnit]) -> Result<String, SemaE
 
 /// Verifica tipos de todos os módulos antes de qualquer emissão (Seção 1: "todo o programa é
 /// verificado em termos de tipo antes que qualquer código seja gerado").
-fn check_types(entry: &str, modules: &[ModuleUnit]) -> Result<(), SemaError> {
+fn check_types(
+    entry: &str,
+    modules: &[ModuleUnit],
+) -> Result<HashMap<String, HashMap<(u32, u32, u32, u32), Ty>>, SemaError> {
     // Os módulos vêm em ordem de carregamento (importados antes de quem importa), então cada um
     // pode registrar seus tipos para os seguintes.
     let mut exported: HashMap<String, HashMap<String, Ty>> = HashMap::new();
@@ -156,7 +183,10 @@ fn check_types(entry: &str, modules: &[ModuleUnit]) -> Result<(), SemaError> {
         }
     }
 
-    // Fase 2 — checagem definitiva: agora qualquer erro é real e é relatado.
+    // Fase 2 — checagem definitiva: agora qualquer erro é real e é relatado. Os tipos das
+    // expressões sob `try` são coletados aqui para o emissor escolher o neutro por tipo
+    // (Seção 4.9).
+    let mut try_types: HashMap<String, HashMap<(u32, u32, u32, u32), Ty>> = HashMap::new();
     for unit in modules {
         let mut checker = TypeChecker::new(&unit.path);
         for import in &unit.ast.imports {
@@ -165,9 +195,10 @@ fn check_types(entry: &str, modules: &[ModuleUnit]) -> Result<(), SemaError> {
             }
         }
         checker.check_module(&unit.ast)?;
+        try_types.insert(unit.name.clone(), checker.try_types);
     }
     let _ = entry;
-    Ok(())
+    Ok(try_types)
 }
 
 /// Nome Rust de um módulo XPR. O prefixo evita colisão com identificadores do arquivo gerado.
@@ -185,7 +216,10 @@ pub fn rust_module_name(xpr_name: &str) -> String {
 }
 
 /// Emite um módulo XPR como `mod` Rust com uma função por definição.
-fn emit_module(unit: &ModuleUnit) -> Result<String, SemaError> {
+fn emit_module(
+    unit: &ModuleUnit,
+    try_types: &HashMap<(u32, u32, u32, u32), Ty>,
+) -> Result<String, SemaError> {
     let mut out = String::new();
     out.push_str(&format!("pub mod {} {{\n", rust_module_name(&unit.name)));
     out.push_str("    use super::*;\n");
@@ -205,7 +239,7 @@ fn emit_module(unit: &ModuleUnit) -> Result<String, SemaError> {
     // Definições visíveis até o ponto corrente: a spec exige uso após definição (Seção 4.6).
     let mut defined: HashSet<String> = HashSet::new();
     for def in &unit.ast.definitions {
-        let mut emitter = Emitter::new(&unit.path, &aliases, def.name.clone());
+        let mut emitter = Emitter::new(&unit.path, &aliases, def.name.clone(), try_types.clone());
         emitter.defined = defined.clone();
         let body = emitter.emit_definition(def)?;
         out.push_str(&body);
@@ -230,12 +264,20 @@ struct Emitter<'a> {
     /// Nomes-alvo de uma atribuição cujo valor é uma `fn_def`: são "pendentes" (Seção 4.5) e
     /// referências a eles dentro do corpo resolvem para a própria função (`__self`).
     pending_self: Vec<String>,
+    /// Tipo da expressão sob cada `try` (por span) — neutro escolhido por tipo (Seção 4.9).
+    try_types: HashMap<(u32, u32, u32, u32), Ty>,
     temp: usize,
 }
 
 impl<'a> Emitter<'a> {
-    fn new(file: &'a str, aliases: &'a HashMap<String, String>, current_def: String) -> Self {
+    fn new(
+        file: &'a str,
+        aliases: &'a HashMap<String, String>,
+        current_def: String,
+        try_types: HashMap<(u32, u32, u32, u32), Ty>,
+    ) -> Self {
         Self {
+            try_types,
             file,
             aliases,
             current_def,
@@ -438,12 +480,12 @@ impl<'a> Emitter<'a> {
                 body,
                 span,
             } => self.emit_for(init, cond, step, body, *span),
-            Expr::Try(inner, _) => {
+            Expr::Try(inner, span) => {
                 // `try(e)` devolve sempre `[bool, T]` (Seção 4.9); no caminho de falha o segundo
                 // elemento é o valor neutro do tipo de `e`. A anotação de tipo no `match` deixa o
                 // `Ok(...)` do caminho de sucesso com tipo conhecido.
                 let code = self.emit_expr(inner)?;
-                let neutral = self.neutral_expr(inner);
+                let neutral = self.neutral_expr(inner, *span);
                 // O corpo precisa rodar **dentro de uma closure**: os `?` que ele contém têm de
                 // retornar dela (virando o `Err` capturado), e não propagar pela função inteira.
                 Ok(format!(
@@ -466,11 +508,23 @@ impl<'a> Emitter<'a> {
 
     /// Expressão Rust que produz o **valor neutro** do tipo de `expr` (Seção 4.9).
     ///
-    /// A escolha é feita pela forma sintática da expressão, que é o que o emissor tem em mãos: um
-    /// builtin de conversão determina o tipo de destino (`int(...)` → `0`, `real(...)` → `0.0`,
-    /// `string(...)` → `""`); um literal de string → `""`; uma comparação ou `and`/`or`/`not` →
-    /// `false`; um literal real → `0.0`; um literal entre colchetes → `[]`; e todo o resto → `0`.
-    fn neutral_expr(&self, expr: &Expr) -> String {
+    /// A escolha primária é pelo **tipo** que o `TypeChecker` registrou para esta ocorrência de
+    /// `try` (`try_types`, por span): int → `0`, real → `0.0`, string → `""`, bool → `false`,
+    /// lista → `[]`, tupla → posição a posição. Sem tipo conhecido (`Any` de genéricos, ou
+    /// defesa contra ocorrências não registradas), recai na forma sintática: um builtin de
+    /// conversão determina o destino (`int(...)` → `0`, `real(...)` → `0.0`, `string(...)` →
+    /// `""`); um literal de string → `""`; comparação ou `and`/`or`/`not` → `false`; literal
+    /// real → `0.0`; colchetes → `[]`; e todo o resto → `0`.
+    fn neutral_expr(&self, expr: &Expr, try_span: Span) -> String {
+        let key = (
+            try_span.line_start,
+            try_span.col_start,
+            try_span.line_end,
+            try_span.col_end,
+        );
+        if let Some(neutral) = self.try_types.get(&key).and_then(neutral_of_ty) {
+            return neutral;
+        }
         let value = match expr {
             Expr::StringLit(_, _, _) => "xpr_rt::Value::string(\"\")".to_string(),
             Expr::RealLit(_, _) => "xpr_rt::Value::Real(0.0)".to_string(),
