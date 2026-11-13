@@ -219,6 +219,14 @@ fn emit_atribuicao_a_global_dentro_de_funcao_e_erro() {
 }
 
 #[test]
+fn emit_recursao_sem_ramificacao_determinante_e_cannot_infer() {
+    // Seção 4.10: função recursiva cujo resultado só vem de chamadas a si mesma é rejeitada
+    // com cannot-infer, antes de qualquer emissão.
+    let (code, _) = emit_err("f = fn(x){ f(x); };\n_main = fn(x){ 0; };");
+    assert_eq!(code, DiagCode::CannotInfer);
+}
+
+#[test]
 fn emit_redefinicao_no_nivel_de_modulo_continua_valida() {
     // Seção 4.5: redefinir no nível de módulo é legítimo (o exemplo das "variáveis salvas");
     // a leitura dentro da função congela o valor da definição, não o nome.

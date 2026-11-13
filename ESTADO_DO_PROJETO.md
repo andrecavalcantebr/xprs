@@ -19,6 +19,14 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
+* **Pós-Codegen: limitação `cannot-infer` FECHADA (caso recursivas)** (Seção 4.10, "o tipo de
+  resultado de uma função recursiva é determinado pelas ramificações que não chamam a própria
+  função"): `f = fn(x){ f(x); };` e `iif(c, f(x), f(x))` são rejeitados em compilação;
+  `x * fat(x-1)` e builtins genéricos (`fill`, …) NÃO disparam (análise sintática conservadora
+  via `result_calls_self`). Os casos de genéricos — uso como valor sem contexto (linha 725) e
+  `apply` com `[]` (linha 816) — seguem abertos, acoplados à especialização (limitação 2).
+  Incidente 3.3.1: M10 usava recursão pura (`rec = fn(n){ rec(n+1); };`) para o teste de
+  profundidade; ajustado para `iif(n < 0, 0, rec(n + 1))` (válido pela 4.10, mesma saída).
 * **Pós-Codegen: limitação `assign-to-constant` FECHADA** (Seção 6). Constantes predefinidas
   (`true`/`false`/`NaN`/`INF`/`pi`/`PI`/`e`/`E`) são somente leitura em qualquer escopo; nomes de
   nível superior são somente leitura dentro de funções (redefinição no nível de módulo continua
@@ -84,6 +92,10 @@ Documentos: `xpr-specs.md` (especificação canônica), `plano-lexer.md` e `plan
 * `param_pattern` é obrigatório (`fn()` não existe); `fn_call` só chama `qualified_name`;
   `MultiArgCall` aponta para a vírgula; `InvalidAssignmentTarget` aponta para o `=`.
 * `edition = "2021"` (toolchain instalado: 1.75.0; edition 2024 exigiria 1.85+).
+* **`cannot-infer` de recursivas** (Seção 4.10): `result_calls_self` faz análise sintática
+  conservadora — só a chamada pura, o `iif` com ambas as ramificações dependentes, o `try` e a
+  última expressão de bloco contam; operadores e builtins genéricos não (têm tipo próprio/`Any`
+  sem relação com recursão).
 * **Somente leitura da Seção 6**: `predefined_constant` (types.rs) é a fonte única das constantes
   predefinidas (`true`/`false` bool; `NaN`/`INF`/`pi`/`PI`/`e`/`E` real, ambos os grafões);
   `assign` é *local-first* e aplica `assign-to-constant` a constantes em qualquer escopo e a
@@ -97,7 +109,9 @@ em vez de simplesmente revertê-la.
 
 Detalhes em `RELATORIO_PROGRESSO.md`, seção "Etapa 3 — Codegen":
 
-1. `cannot-infer` não é emitido (parâmetro sem anotação vira `Ty::Any`).
+1. `cannot-infer` **parcialmente fechado** (recursivas sem ramificação determinante); os
+   casos de genérico (uso como valor sem contexto; `apply` com `[]`) dependem da especialização
+   da limitação 2.
 2. Genéricos não geram instâncias especializadas (Seção 4.10) — funcionam via `Any`.
 3. Neutro do `try` aproximado pela forma sintática da expressão.
 4. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas.
@@ -112,8 +126,9 @@ Detalhes em `RELATORIO_PROGRESSO.md`, seção "Etapa 3 — Codegen":
 O processo de `AGENTS.md` (Fases 1, 2 e 3) está **completo**. Para continuar evoluindo:
 
 1. Escolher **um** item das "Limitações conhecidas" acima (sugestão de ordem por valor/esforço:
-   `cannot-infer`, depois neutro do `try` por tipo, depois índice de tupla constante, depois
-   `_init`/ordem de inicialização, depois nomes privados). `assign-to-constant` já foi fechado
+   neutro do `try` por tipo, depois índice de tupla constante, depois `_init`/ordem de
+   inicialização, depois nomes privados — ou especialização de genéricos, que fecha o restante
+   de `cannot-infer`). `assign-to-constant` e o `cannot-infer` de recursivas já foram fechados
    (ver "Status atual").
 2. Escrever **primeiro** o teste — milestone em `tests/codegen/milestones/` (a suíte só cresce) ou
    unitário em `src/codegen/types.rs`/`tests/codegen_tests.rs` — e confirmar que ele falha.

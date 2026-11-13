@@ -204,9 +204,12 @@ derruba o gate da etapa inteira.
 
 A etapa Codegen é grande (semântica + módulos + tipos + genéricos + catálogo + runtime + emissão +
 CLI) e foi entregue com o pipeline fechado e 14 milestones verdes, mas com lacunas conscientes e
-documentadas: `cannot-infer` não é emitido, genéricos não geram instâncias especializadas, o
+documentadas: `cannot-infer` permanece para os casos de genéricos (uso como valor sem contexto,
+`apply` com `[]` — dependem da especialização), genéricos não geram instâncias especializadas, o
 neutro do `try` é aproximado pela forma sintática, `_init`/ordem de inicialização entre módulos e
-nomes privados não existem. A lacuna `assign-to-constant` foi **fechada depois** (Seção 6:
+nomes privados não existem. Foram **fechadas depois** (ver "Pós-Codegen" em
+`RELATORIO_PROGRESSO.md`): `assign-to-constant` (Seção 6, incluindo os aliases `PI`/`e`) e
+`cannot-infer` de recursivas sem ramificação determinante (Seção 4.10). A lacuna `assign-to-constant` foi **fechada depois** (Seção 6:
 constantes predefinidas — agora incluindo os aliases `PI`/`e` — e nomes de nível superior são
 somente leitura dentro de funções; ver "Pós-Codegen" em `RELATORIO_PROGRESSO.md`). Nenhuma delas foi mascarada: cada uma
 está listada aqui e em `ESTADO_DO_PROJETO.md`, com a indicação de como fechá-la (teste primeiro).
@@ -220,7 +223,7 @@ está listada aqui e em `ESTADO_DO_PROJETO.md`, com a indicação de como fechá
 | Planejamento | Concluída | `plano-lexer.md`, `plano-parser.md`, `plano-codegen.md`, `plano-testes-codegen.md`, ambiente Cargo + Git |
 | Lexer | Concluída | 52 unitários, 12/12 fixtures, `scripts/run-lexer-tests.sh` = 0 |
 | Parser | Concluída | 80 unitários (A–J), 16/16 fixtures, `scripts/run-parser-tests.sh` = 0 |
-| Codegen | Concluída | 26 unitários + 41 de integração, 14/14 milestones, `scripts/run-all-tests.sh` → `TUDO OK` (números incluem o fechamento pós-etapa de `assign-to-constant`) |
+| Codegen | Concluída | 32 unitários + 42 de integração, 14/14 milestones, `scripts/run-all-tests.sh` → `TUDO OK` (números incluem os fechamentos pós-etapa de `assign-to-constant` e `cannot-infer` de recursivas) |
 
 O compilador está funcional de ponta a ponta: `xprc testes/codegen/milestones/M4_closures/main.x -o
 prog && ./prog` imprime `120` e `999`, como a Seção 4.5 da especificação exige.

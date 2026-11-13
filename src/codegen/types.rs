@@ -182,6 +182,43 @@ pub struct TypeChecker<'a> {
     pending: Vec<String>,
 }
 
+/// O **valor de resultado** desta expressão depende de uma chamada à própria função sendo
+/// definida (`is_self`)? Seção 4.10: "o tipo de resultado de uma função recursiva é determinado
+/// pelas ramificações que não chamam a própria função" — se todas dependem, o tipo não pode ser
+/// inferido (`cannot-infer`).
+///
+/// A análise é sintática e conservadora: conta como "dependente" apenas a chamada pura (o
+/// resultado É a chamada), o `iif` cujas **duas** ramificações dependem, o `try` cujo tipo de
+/// resultado acompanha o da expressão tentada e o bloco pela última expressão. Operadores têm
+/// tipo próprio — `x * fat(x - 1)` é numérico mesmo contendo uma chamada no caminho — e
+/// builtins genéricos (`fill`, `at`, `apply`, …) devolvem `Any` sem relação com recursão.
+fn result_calls_self(expr: &Expr, is_self: &impl Fn(&str) -> bool) -> bool {
+    match expr {
+        Expr::FnCall { target, .. } => matches!(
+            target.as_ref(),
+            Expr::QualifiedName {
+                module_alias: None,
+                name,
+                ..
+            } if is_self(name)
+        ),
+        Expr::Iif {
+            then_branch,
+            else_branch,
+            ..
+        } => result_calls_self(then_branch, is_self) && result_calls_self(else_branch, is_self),
+        Expr::Try(inner, _) => result_calls_self(inner, is_self),
+        Expr::Block(block) => block
+            .statements
+            .last()
+            .is_some_and(|stmt| match stmt {
+                Stmt::Expr(expr) => result_calls_self(expr, is_self),
+                Stmt::Import(_) => false,
+            }),
+        _ => false,
+    }
+}
+
 impl<'a> TypeChecker<'a> {
     pub fn new(file: &'a str) -> Self {
         Self {
@@ -863,6 +900,23 @@ impl<'a> TypeChecker<'a> {
         let result = self.check_block(&fn_def.body);
         self.scopes.pop();
         let result_ty = result?;
+        // Seção 4.10: se toda ramificação do resultado chama a própria função (nome corrente ou
+        // pendente — a recursão direta da Seção 4.5), o tipo do resultado não é determinável.
+        let is_self = |name: &str| -> bool {
+            name == self.current || self.pending.iter().any(|pending| pending == name)
+        };
+        if let Some(Stmt::Expr(last)) = fn_def.body.statements.last() {
+            if result_calls_self(last, &is_self) {
+                return Err(self.error(
+                    DiagCode::CannotInfer,
+                    last.span(),
+                    format!(
+                        "o resultado de {} não é determinado: toda ramificação do resultado chama a própria função (Seção 4.10)",
+                        self.current
+                    ),
+                ));
+            }
+        }
         let _ = self_name;
         Ok(Ty::Fn(Box::new(param_ty), Box::new(result_ty)))
     }
@@ -1163,5 +1217,65 @@ mod tests {
         assert_eq!(types["r"], Ty::Real);
         let types = check("b = true == false;").expect("válido");
         assert_eq!(types["b"], Ty::Bool);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // cannot-infer (Seção 4.10): recursão sem ramificação determinante
+    // -----------------------------------------------------------------------------------------
+
+    #[test]
+    fn recursao_pura_e_cannot_infer() {
+        // "O tipo de resultado de uma função recursiva é determinado pelas ramificações que não
+        // chamam a própria função. Se nenhuma ramificação o determinar, a função é rejeitada
+        // em tempo de compilação com cannot-infer." (Seção 4.10)
+        assert_eq!(check_err("f = fn(x){ f(x); };"), DiagCode::CannotInfer);
+    }
+
+    #[test]
+    fn recursao_nas_duas_ramificacoes_do_iif_e_cannot_infer() {
+        assert_eq!(
+            check_err("f = fn(x){ iif(x, f(x), f(x)); };"),
+            DiagCode::CannotInfer
+        );
+        // `try` acompanha o tipo da expressão tentada: o resultado continua indeterminado.
+        assert_eq!(
+            check_err("f = fn(x){ try(f(x)); };"),
+            DiagCode::CannotInfer
+        );
+    }
+
+    #[test]
+    fn uma_ramificacao_sem_chamada_resolve_o_tipo() {
+        // O `then` chama a própria, mas o `else` (`0`) determina int.
+        let types = check("f = fn(x){ iif(x, f(x - 1), 0); };").expect("válido");
+        assert!(types.contains_key("f"));
+        // Fatorial clássico: os operadores têm tipo próprio, `x * fat(x-1)` não é chamada pura.
+        let types = check("fat = fn(x){ iif(x <= 1, 1, x * fat(x - 1)); };").expect("válido");
+        assert!(types.contains_key("fat"));
+    }
+
+    #[test]
+    fn resultado_generico_por_builtin_nao_e_cannot_infer() {
+        // `fill` devolve tipo genérico (`Any`); isso é a especialização pendente (limitação
+        // registrada), não `cannot-infer` de recursão — a ramificação não chama a própria.
+        let types = check("f = fn(x){ fill([x]); };").expect("válido");
+        assert!(types.contains_key("f"));
+    }
+
+    #[test]
+    fn recursao_de_nome_pendente_local_e_cannot_infer() {
+        // Nome pendente de atribuição local (`g = fn(x){ g(x); }` dentro de função) segue a
+        // mesma regra da recursão direta (Seção 4.5: os pendentes valem dentro do corpo).
+        assert_eq!(
+            check_err("_main = fn(a){ g = fn(x){ g(x); }; 0; };"),
+            DiagCode::CannotInfer
+        );
+    }
+
+    #[test]
+    fn chamada_a_outra_funcao_no_resultado_nao_e_cannot_infer() {
+        // Só a chamada à **própria** função conta; chamar outra é o caso comum.
+        let types = check("f = fn(x){ x; }; g = fn(y){ f(y); };").expect("válido");
+        assert!(types.contains_key("g"));
     }
 }

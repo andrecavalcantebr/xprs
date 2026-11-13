@@ -312,9 +312,10 @@ vinculando `libxpr_rt.rlib` (compilada sob demanda e cacheada em `xpr_rt/target/
 
 ### Limitações conhecidas (registradas, não mascaradas)
 
-1. **`cannot-infer` não é emitido.** Funções sem anotação no parâmetro recebem `Ty::Any` em vez de
-   falhar, e a especialização de genéricos (Seção 4.10) não gera instâncias separadas. Programas
-   que a spec rejeitaria com `cannot-infer` hoje passam.
+1. **`cannot-infer` — PARCIALMENTE FECHADO na subetapa pós-Codegen** (ver seção "Pós-Codegen:
+   fechamento de `cannot-infer` (recursivas)" abaixo): recursão sem ramificação determinante é
+   rejeitada. Seguem abertos, por dependerem da especialização de genéricos: uso como valor sem
+   contexto (linha 725 da spec) e `apply` com `[]` literal (linha 816).
 2. **`assign-to-constant` — FECHADO na subetapa pós-Codegen** (ver seção "Pós-Codegen:
    fechamento de `assign-to-constant`" abaixo). Constantes predefinidas e nomes de nível
    superior (dentro de funções) passaram a ser somente leitura, com `PI`/`e` adicionados como
@@ -416,4 +417,46 @@ cargo test --lib codegen::types   → 26 passed; 0 failed (21 antigos + 5 novos)
 cargo test --test codegen_tests   → 41 passed; 0 failed (38 antigos + 3 novos)
 ./scripts/run-all-tests.sh        → TUDO OK (exit 0)
 milestones                        → 14/14 OK (M12 com o rename de conformidade)
+```
+
+---
+
+## Pós-Codegen: fechamento de `cannot-infer` — recursivas (Seção 4.10)
+
+Segunda limitação fechada, mesmo processo (teste primeiro → implementação → gate `TUDO OK`).
+
+### Atividades realizadas
+
+* **Testes primeiro (TDD)**: 6 unitários novos em `src/codegen/types.rs` (recursão pura; `iif`
+  com as duas ramificações recursivas; `try` de chamada a si; não-regressões: ramo `0`
+  determinando, fatorial clássico, `fill` genérico, recursão de nome pendente local, chamada a
+  outra função) + 1 de integração (`emit_err` de `f = fn(x){ f(x); };`). Confirmados: 3 falhas
+  esperadas antes da implementação.
+* **Implementação** (só `src/codegen/types.rs`): `result_calls_self(expr, is_self)` — análise
+  sintática conservadora do **valor de resultado** (última expressão do corpo): chamada pura à
+  própria função (nome corrente ou pendente), `iif` com ambas as ramificações dependentes, `try`
+  e bloco (pela última expressão). `check_fn` dispara `cannot-infer` nesses casos.
+* **Correção de conformidade no M10** (incidente AGENTS.md 3.3.1, reportado ao usuário): o
+  milestone exercitava `call-depth-exceeded` com `rec = fn(n){ rec(n + 1); };` — exatamente a
+  forma que a Seção 4.10 rejeita em compilação. Ajustado para
+  `rec = fn(n){ iif(n < 0, 0, rec(n + 1)); };` — válida (o ramo `0` determina int), infinita na
+  prática (n ≥ 0 nunca sai) e com a mesma saída `false` (o `try` continua capturando o limite).
+
+### Decisões de design
+
+* **Análise sintática, não por `Ty::Any`**: disparar por `result_ty == Any` daria falso positivo
+  com builtins genéricos (`fill`, `at`, `apply` devolvem `Any`) e falso negativo com
+  `try(f(x))` (cujo tipo `[bool, ?]` não é `Any`). A letra da spec ("ramificações que não chamam
+  a própria função") é sintática — e operadores têm tipo próprio: `x * fat(x-1)` é numérico
+  mesmo contendo a chamada no caminho.
+* **`is_self` = nome corrente ∪ pendentes**: cobre a recursão direta de módulo (`fat = fn…`) e
+  a de nomes pendentes locais (`g = fn(x){ g(x); }` dentro de função, Seção 4.5).
+
+### Resultado dos testes
+
+```
+cargo test --lib codegen::types   → 32 passed; 0 failed (26 + 6 novos)
+cargo test --test codegen_tests   → 42 passed; 0 failed (41 + 1 novo)
+./scripts/run-all-tests.sh        → TUDO OK (exit 0)
+milestones                        → 14/14 OK (M10 ajustado à Seção 4.10)
 ```
