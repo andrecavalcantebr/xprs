@@ -701,4 +701,38 @@ cargo test --test codegen_tests  → 53 passed; 0 failed
 ./scripts/run-all-tests.sh       → TUDO OK; milestones 15/15 OK
 ```
 
-Nenhuma mudança de `Cargo.toml`: `edition = "2021"` continua válida na 1.100.
+Nenhuma mudança de `Cargo.toml` foi necessária nesta etapa: `edition = "2021"` já é válida na
+1.100 (a migração para 2024 é a etapa seguinte, feita depois da fixação da toolchain).
+
+---
+
+## Migração para edition 2024
+
+Item final da série de atualização do toolchain. Feita **depois** da fixação da versão
+(`rust-toolchain.toml` em 1.100.0), com o gate verde nos dois estados.
+
+### Atividades realizadas
+
+* **Levantamento prévio de riscos** da 2024: `gen` como identificador (novo keyword), `static
+  mut`, e `unsafe`. Nenhuma ocorrência real no projeto — só a palavra `unsafe` numa lista de
+  palavras-chave do emissor. Isso previu uma migração sem atrito.
+* **Mudança**: `edition = "2021"` → `"2024"` em `Cargo.toml` e `xpr_rt/Cargo.toml`.
+* **Resultado**: `cargo build` limpo **sem nenhuma alteração de código-fonte**, e o gate
+  completo verde — mesmo conjunto de testes, mesma saída dos milestones.
+
+### Decisão registrada (escopo deliberadamente não ampliado)
+
+O `xprc` compila o **código Rust que gera** com `--edition=2021` fixo em `src/main.rs`. Isso é
+independente da edition do projeto (Rust permite editions distintas entre crates) e foi mantido:
+o binário aceita `--rustc <caminho>`, portanto fixar 2021 preserva a portabilidade do Rust
+emitido para toolchains mais antigos que o do projeto. Migrar o código gerado seria uma decisão
+separada — não um efeito colateral desta etapa.
+
+### Resultado dos testes (edition 2024, toolchain 1.100.0)
+
+```
+cargo test (lib)                 → 45 passed; 0 failed
+cargo test (bin xprc)            → 4 passed; 0 failed
+cargo test --test codegen_tests  → 53 passed; 0 failed
+./scripts/run-all-tests.sh       → TUDO OK; milestones 15/15 OK
+```

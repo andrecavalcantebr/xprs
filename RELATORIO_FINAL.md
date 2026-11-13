@@ -4,7 +4,7 @@ Documento de encerramento conforme `AGENTS.md` [3]. Consolida a arquitetura da l
 estrutura do compilador, as decisões de implementação, as lições aprendidas ao longo das três
 etapas e o status final do projeto.
 
-*Toolchain de referência*: `rustc`/`cargo` 1.75.0, `edition = "2021"`.
+*Toolchain de referência*: `rustc`/`cargo` 1.100.0 (fixada em `rust-toolchain.toml`), `edition = "2024"`.
 *Data de conclusão*: etapa Lexer → Parser → Codegen, todas com gate verde.
 
 ---

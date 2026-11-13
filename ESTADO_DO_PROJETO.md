@@ -19,9 +19,17 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
+* **Edition 2024** nos dois manifests (`Cargo.toml` e `xpr_rt/Cargo.toml`), após a fixação da
+  toolchain. Nenhuma linha de código precisou mudar: não há `gen` como identificador, `static
+  mut` nem `unsafe` no projeto (verificado antes da migração). Gate `TUDO OK` igual ao da 2021.
+  **Decisão registrada**: o código *gerado* pelo `xprc` continua compilado com
+  `--edition=2021` (`src/main.rs`), de propósito — o binário aceita `--rustc <caminho>`, então
+  fixar 2021 mantém o Rust emitido compilável num toolchain mais antigo que o do projeto.
+  Trocar para 2024 ali é uma decisão à parte, não um efeito colateral desta migração.
 * **Toolchain: Rust 1.100.0 via rustup** (era 1.75.0 do `.deb` do Ubuntu, removido com
   `apt remove --purge rustc cargo` + purge dos órfãos `libstd-rust*`). Sem duplicata: `type -a
-  rustc cargo` → só `~/.cargo/bin/*`. `edition = "2021"` inalterado (nada no projeto exigia 1.75).
+  rustc cargo` → só `~/.cargo/bin/*`. `edition` era 2021 na troca e passou a 2024 na etapa
+  seguinte (ver bullet acima).
   **Bug de portabilidade corrigido**: `find_rlib` só procurava `debug/deps/libxpr_rt-<hash>.rlib`
   e no cargo ≥ 1.80 o artefato canônico é `debug/libxpr_rt.rlib` (sem `deps/`), então o runtime
   "não era encontrado" (16 e2e falhavam). Agora aceita os dois layouts, prefere o canônico e
@@ -134,7 +142,8 @@ Documentos: `xpr-specs.md` (especificação canônica), `plano-lexer.md` e `plan
 * Escapes de string são decodificados **no parser**; escape desconhecido é preservado literalmente.
 * `param_pattern` é obrigatório (`fn()` não existe); `fn_call` só chama `qualified_name`;
   `MultiArgCall` aponta para a vírgula; `InvalidAssignmentTarget` aponta para o `=`.
-* `edition = "2021"` (toolchain instalado: 1.75.0; edition 2024 exigiria 1.85+).
+* `edition = "2024"` (toolchain fixada em 1.100.0 por `rust-toolchain.toml`; a edition 2024
+  exige 1.85+, e o código gerado pelo `xprc` continua em `--edition=2021`).
 * **Especialização de genéricos** (Seção 4.10): `instantiate(nome, tipo_do_argumento)` recheca o
   corpo com o parâmetro no tipo concreto e devolve o tipo de resultado da instância; memoização
   `(nome, tipo)` **antes** do re-cheque (guarda de reentrância para recursivas).
