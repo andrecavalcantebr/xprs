@@ -811,9 +811,21 @@ Cada builtin recebe um argumento e retorna um resultado (veja 4.10). `α` e `β`
 
   * Uma falha dentro de `f` é a falha de todo o `apply`, sem resultado parcial (veja 4.9); saídas produzidas por chamadas anteriores permanecem. Como as capturas são somente leitura, a ordem das chamadas é observável apenas por meio de efeitos colaterais como `print` e `input`.
 
+  * **Lista vazia é absorvente.** `apply([[], f])` resulta em `[]` para **qualquer** `f`, e `f` não
+    é instanciado nesse caso: sem elementos, não há tipo de elemento que determine a instância. A
+    lista vazia é o elemento neutro da aplicação, como o zero é da soma — a operação não tem o que
+    transformar. Isso vale inclusive quando `f` é genérica e seu corpo seria inválido para algum
+    tipo (`apply([[], fn(x){ x * 2; }])` é válido): o corpo nunca receberia um elemento.
+
+  * **`f` é instanciado no uso** (Seção 4.10), com o tipo de elemento de `xs`. Um `f` definido como
+    `f = fn(x){ … }` é uma vinculação genérica — nada é instanciado na atribuição; a instância é
+    criada nesta chamada. Assim, `apply([["a"], fn(x){ x + 1; }])` é `type-mismatch` (a instância
+    string de `x + 1` é inválida), enquanto `apply([["a", "b"], fn(x){ x + "1"; }])` resulta em
+    `["a1", "b1"]`. O resultado tem o tipo de resultado **daquela** instância.
+
   * No momento, `apply` aceita apenas listas. Ele poderá posteriormente receber suporte para strings, assim como `len`, `at` e `slice`, sem alterar o caso de listas; até lá, textos são manipulados por funções de string separadas.
 
-* Um builtin que constrói uma lista a partir de listas retorna uma lista vazia quando não há nada para construir (`cat` de listas vazias, `slice` de uma lista vazia, `range` de um intervalo vazio, `at` com uma lista de índices vazia, `apply` de uma lista vazia; para o literal `[]`, o tipo de elemento do resultado deve vir de `f`, caso contrário ocorrerá `cannot-infer`). Apenas operações que devem produzir ou posicionar um único elemento podem falhar: `at` com um índice int, `set`, e `fill` com tamanho negativo.
+* Um builtin que constrói uma lista a partir de listas retorna uma lista vazia quando não há nada para construir (`cat` de listas vazias, `slice` de uma lista vazia, `range` de um intervalo vazio, `at` com uma lista de índices vazia, `apply` de uma lista vazia; o literal `[]` absorve qualquer função, veja abaixo). Apenas operações que devem produzir ou posicionar um único elemento podem falhar: `at` com um índice int, `set`, e `fill` com tamanho negativo.
 
 * Funções matemáticas como `sqrt`, `exp`, `sin` e `log`, assim como operações matriciais e de listas além das descritas acima, não são builtins: pertencem a bibliotecas (um módulo `math` da biblioteca padrão está planejado) que seguem a mesma regra elemento a elemento.
 

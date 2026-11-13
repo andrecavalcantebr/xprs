@@ -909,6 +909,11 @@ impl<'a> TypeChecker<'a> {
         arg: Option<&Expr>,
         span: Span,
     ) -> Result<Ty, SemaError> {
+        // `apply` não é um builtin homogêneo: precisa do AST para instanciar `f` com o tipo de
+        // elemento de `xs` (Seção 5). Tratado antes da checagem genérica do argumento.
+        if name == "apply" {
+            return self.check_apply(arg, span);
+        }
         let arg_ty = match arg {
             Some(arg) => self.check_expr(arg)?,
             // `f()` equivale a `f([])` (Seção 4.5).
@@ -963,12 +968,99 @@ impl<'a> TypeChecker<'a> {
                     format!("cat espera uma lista de listas, recebeu {}", other.name()),
                 )),
             },
-            "fill" | "range" | "set" | "slice" | "at" | "apply" => Ok(Ty::Any),
+            "fill" | "range" | "set" | "slice" | "at" => Ok(Ty::Any),
             other => Err(self.error(
                 DiagCode::UndefinedIdentifier,
                 span,
                 format!("builtin desconhecido: {}", other),
             )),
+        }
+    }
+
+    /// `apply([xs, f])`: aplica `f` elemento a elemento (Seção 5).
+    ///
+    /// Duas regras, decididas na spec:
+    ///
+    /// * `f` é instanciado com o **tipo do elemento** de `xs` (Seção 4.10: instanciação no uso) e
+    ///   o resultado é `[β]`, o tipo de resultado daquela instância.
+    /// * `xs` vazio (`[]`) é absorvente: o resultado é `[]` para **qualquer** `f`, e `f` **não** é
+    ///   instanciado — não há elemento, logo não há tipo de elemento que determine a instância.
+    fn check_apply(&mut self, arg: Option<&Expr>, span: Span) -> Result<Ty, SemaError> {
+        let elements = match arg {
+            Some(Expr::BracketLiteral(elements, _)) => elements.as_slice(),
+            // Forma não literal (`apply(v)`): não há como isolar `xs` e `f` no AST, então o tipo
+            // segue sendo indeterminado — é o `Any` de antes.
+            _ => return Ok(Ty::Any),
+        };
+        let (xs, f) = match elements {
+            [xs, f] => (xs, f),
+            // `apply` espera exatamente `[xs, f]`.
+            _ => {
+                return Err(self.error(
+                    DiagCode::SizeMismatch,
+                    span,
+                    "apply espera uma lista de dois elementos: [xs, f]".to_string(),
+                ))
+            }
+        };
+        let xs_ty = self.check_expr(xs)?;
+        let f_ty = self.check_expr(f)?;
+        let element_ty = match &xs_ty {
+            Ty::List(inner) => (**inner).clone(),
+            other => {
+                return Err(self.error(
+                    DiagCode::TypeMismatch,
+                    span,
+                    format!("apply espera uma lista como primeiro elemento, recebeu {}", other.name()),
+                ))
+            }
+        };
+        // Lista vazia absorvente: `[]` para qualquer `f`, sem instanciar.
+        if elements_match_empty(xs) {
+            return Ok(Ty::List(Box::new(Ty::Any)));
+        }
+        // Instancia `f` com o tipo do elemento, quando `f` é nome de definição genérica ou
+        // literal `fn`. O resultado da instância é o tipo de elemento do resultado.
+        if let Some(result_ty) = self.instantiate_from_expr(f, &element_ty)? {
+            return Ok(Ty::List(Box::new(result_ty)));
+        }
+        // Sem instância (builtin, `Any`, expressão): o resultado de `f` vem da assinatura.
+        match f_ty {
+            Ty::Fn(_, result) => Ok(Ty::List(result)),
+            _ => Ok(Ty::List(Box::new(Ty::Any))),
+        }
+    }
+
+    /// Instancia a definição referida por `expr` (nome ou literal `fn`) com `arg_ty`.
+    fn instantiate_from_expr(
+        &mut self,
+        expr: &Expr,
+        arg_ty: &Ty,
+    ) -> Result<Option<Ty>, SemaError> {
+        match expr {
+            Expr::QualifiedName {
+                module_alias: None,
+                name,
+                ..
+            } => self.instantiate(name, arg_ty),
+            Expr::FnDef(fn_def) => {
+                // Literal: verifica o corpo com o parâmetro no tipo do elemento.
+                if !matches!(fn_def.param, ParamPattern::Name { ty: None, .. }) {
+                    return Ok(None);
+                }
+                let concrete = match arg_ty {
+                    Ty::Any => return Ok(None),
+                    ty => ty.clone(),
+                };
+                self.scopes.push(HashMap::new());
+                if let ParamPattern::Name { name: param, .. } = &fn_def.param {
+                    self.declare(param, concrete);
+                }
+                let result = self.check_block(&fn_def.body);
+                self.scopes.pop();
+                result.map(Some)
+            }
+            _ => Ok(None),
         }
     }
 
@@ -1526,4 +1618,60 @@ mod tests {
             DiagCode::TypeMismatch
         );
     }
+
+    // -----------------------------------------------------------------------------------------
+    // `apply` instancia `f` com o tipo de elemento de `xs` (Seções 4.10 e 5)
+    // -----------------------------------------------------------------------------------------
+
+    #[test]
+    fn apply_instancia_a_funcao_com_o_tipo_do_elemento() {
+        // `fn(x){ x + 1; }` aplicada a strings: a instância string de `x + 1` é type-mismatch.
+        assert_eq!(
+            check_err("_main = fn(a){ apply([[\"a\"], fn(x){ x + 1; }]); };"),
+            DiagCode::TypeMismatch
+        );
+        // A mesma função aplicada a ints é válida (instância int).
+        assert!(check("_main = fn(a){ apply([[1, 2], fn(x){ x + 1; }]); };").is_ok());
+    }
+
+    #[test]
+    fn apply_aceita_funcao_que_opera_o_tipo_do_elemento() {
+        // O exemplo da decisão da spec: `x + "1"` sobre strings resulta em lista de strings.
+        assert!(check("_main = fn(a){ apply([[\"a\", \"b\"], fn(x){ x + \"1\"; }]); };").is_ok());
+    }
+
+    #[test]
+    fn apply_sobre_lista_vazia_resulta_vazio_sem_instanciar() {
+        // Decisão da spec (Seção 5): `apply([[], f])` resulta em `[]` para qualquer `f`; a lista
+        // é o elemento absorvente, então `f` não é instanciado e não pode falhar por tipo.
+        assert!(check("_main = fn(a){ apply([[], fn(x){ x * 2; }]); };").is_ok());
+        assert!(check("_main = fn(a){ apply([[], fn(x){ x + 1; }]); };").is_ok());
+    }
+
+    #[test]
+    fn apply_com_funcao_por_nome_instancia_a_definicao() {
+        // Nome resolve para a definição genérica: instancia no uso com o tipo do elemento.
+        assert_eq!(
+            check_err("_main = fn(a){ f = fn(x){ x + 1; }; apply([[\"a\"], f]); };"),
+            DiagCode::TypeMismatch
+        );
+        assert!(check("_main = fn(a){ f = fn(x){ x + 1; }; apply([[1], f]); };").is_ok());
+    }
+
+    #[test]
+    fn apply_propaga_o_tipo_do_resultado_da_instancia() {
+        // Antes devolvia `Any`; agora `[string]` — somar com int é erro.
+        // `r` é `[string]`; somar a lista com `int` é type-mismatch. Se `apply` voltasse `Any`,
+        // este erro desapareceria — é isso que o teste protege.
+        assert_eq!(
+            check_err("_main = fn(a){ r = apply([[\"a\"], fn(x){ x + \"1\"; }]); r + 1; };"),
+            DiagCode::TypeMismatch
+        );
+        // Controle: a mesma lista somada a uma string-lista é válida (`[string] + [string]`).
+    }
+}
+
+/// A expressão é o literal de lista vazia `[]`?
+fn elements_match_empty(expr: &Expr) -> bool {
+    matches!(expr, Expr::BracketLiteral(elements, _) if elements.is_empty())
 }

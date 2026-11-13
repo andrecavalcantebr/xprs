@@ -19,6 +19,17 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
+* **`apply` instancia `f` e lista vazia é absorvente** (decisão de spec + implementação).
+  `check_apply` instancia `f` (nome ou `fn` literal) com o tipo de elemento de `xs` e devolve
+  `[β]`; antes `apply` devolvia `Any`, o que deixava `apply([["a"], fn(x){ x+1; }])` passar sem
+  erro. `apply([[], f])` → `[]` para qualquer `f`, sem instanciar (`[]` é absorvente). Spec (Seção
+  5) reescrita nos dois pontos e milestone `M15_apply_instancia` adicionado (16/16 milestones).
+* **Bug aberto (descoberto por teste de controle, NÃO corrigido): `+` recursivo com folhas
+  string.** `["a"] + ["b"]` e `[1, "a"] + [2, "b"]` dão `type-mismatch`, mas a spec (Seção 4.8,
+  linha ~881/883) manda "folhas string concatenam" e usa `[1, "a"] + [2, "b"] → [3, "ab"]` como
+  exemplo literal. Causa: em `BinOp::Add` o teste `matches!(left, Ty::Str)` é feito antes de
+  recursar em `List`/`Tuple`, então `List(Str)` cai em `numeric_binary`, onde `is_numeric()` falha.
+  `[1] + [2]` funciona; só folhas string quebram. Pré-existente, sem relação com o `apply`.
 * **Edition 2024** nos dois manifests (`Cargo.toml` e `xpr_rt/Cargo.toml`), após a fixação da
   toolchain. Nenhuma linha de código precisou mudar: não há `gen` como identificador, `static
   mut` nem `unsafe` no projeto (verificado antes da migração). Gate `TUDO OK` igual ao da 2021.

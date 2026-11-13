@@ -736,3 +736,58 @@ cargo test (bin xprc)            → 4 passed; 0 failed
 cargo test --test codegen_tests  → 53 passed; 0 failed
 ./scripts/run-all-tests.sh       → TUDO OK; milestones 15/15 OK
 ```
+
+---
+
+## `apply`: instanciação no uso e lista vazia absorvente (decisão de spec)
+
+### Decisões tomadas (usuário + spec)
+
+1. **`apply([[], f])` → `[]` para qualquer `f`**, sem instanciar. A spec antiga exigia
+   `cannot-infer` quando o tipo de elemento não viesse de `f`; isso foi removido. Racional: a lista
+   vazia é absorvente (elemento neutro), então a operação não tem o que transformar e nenhum tipo
+   de elemento existe para determinar uma instância.
+2. **`f` é instanciado no uso**, não na atribuição. `f = fn(x){ … }` é vinculação genérica
+   (Seção 4.10) e a instância é criada na chamada de `apply`, com o tipo de elemento de `xs`.
+   Necessário para que a mesma vinculação sirva a tipos diferentes (`identidade` com `[1,2]` e com
+   `["a","b"]`).
+
+### Implementação
+
+`check_apply` em `src/codegen/types.rs`, roteado antes da checagem genérica de builtin:
+
+* valida a forma `[xs, f]` (`SizeMismatch` caso contrário);
+* `xs` precisa ser lista (`TypeMismatch` caso contrário);
+* se `xs` é o literal `[]`, devolve `[?]` **sem** instanciar `f`;
+* senão instancia `f` via `instantiate_from_expr` (nome → `instantiate`; `fn` literal → checa o
+  corpo com o parâmetro no tipo do elemento) e devolve `[β]`;
+* sem instância possível (builtin, `Any`, expressão), cai na assinatura do `Fn` ou em `Any`.
+
+Antes, `apply` estava na lista que devolvia `Any`, e isso **escapava da verificação de tipo**:
+`apply([["a"], fn(x){ x + 1; }])` compilava e imprimia `[2]` em vez de acusar `type-mismatch`.
+
+5 unitários novos (lib 45 → 50) e milestone `M15_apply_instancia` (milestones 15 → 16).
+
+### Bug pré-existente descoberto (registrado, não corrigido)
+
+Um teste de controle (`["a"] + ["x"]` deveria ser válido) expôs um furo antigo e **independente**
+do `apply`: `+` recursivo em listas/tuplas de **string** falha.
+
+```
+[1] + [2]              -> ok
+["a"] + ["b"]          -> type-mismatch   (spec 4.8: folhas string concatenam)
+[1, "a"] + [2, "b"]    -> type-mismatch   (é exemplo literal da spec, que espera [3, "ab"])
+[[1],[2]] + [[3],[4]]  -> ok
+```
+
+Causa: em `BinOp::Add`, o teste `matches!(left, Ty::Str)` ocorre **antes** da recursão em
+`List`/`Tuple`; `List(Str)` não é `Ty::Str`, então cai em `numeric_binary`, onde `is_numeric()`
+rejeita string. Corrigir exige recursar o mesmo predicado de `+` (numérico **ou** string) em
+listas/tuplas. Fica como item aberto — não foi tocado para não misturar com a mudança do `apply`.
+
+### Gate
+
+```
+./scripts/run-all-tests.sh  ->  TUDO OK
+52 lexer units + 50 lib + 4 bin + 53 integração + 16/16 milestones
+```
