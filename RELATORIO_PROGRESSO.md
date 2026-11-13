@@ -326,7 +326,8 @@ vinculando `libxpr_rt.rlib` (compilada sob demanda e cacheada em `xpr_rt/target/
    e 2 quando é o padrão 15. O exemplo `0.001 → 1.00e-3` da spec é batido (milestone M11), mas a
    regra geral de "quantos significativos aparecem na mantissa" não está inteiramente
    especificada no documento.
-5. **Índice de tupla deveria ser constante** (Seção 4.8); a checagem verifica apenas que é `int`.
+5. **Índice de tupla constante — FECHADO na subetapa pós-Codegen** (ver seção "Pós-Codegen:
+   fechamento do índice de tupla constante" abaixo).
 6. **`_init` e ordem de inicialização entre módulos** não foram implementados (a spec menciona,
    mas nenhum milestone os exige ainda).
 7. **Nomes privados (`_prefixo`) e `import` como statement de bloco** estão rejeitados/marcados
@@ -459,4 +460,42 @@ cargo test --lib codegen::types   → 32 passed; 0 failed (26 + 6 novos)
 cargo test --test codegen_tests   → 42 passed; 0 failed (41 + 1 novo)
 ./scripts/run-all-tests.sh        → TUDO OK (exit 0)
 milestones                        → 14/14 OK (M10 ajustado à Seção 4.10)
+```
+
+---
+
+## Pós-Codegen: fechamento do índice de tupla constante (Seção 4.8)
+
+Terceira limitação fechada, mesmo processo (teste primeiro → implementação → gate `TUDO OK`).
+
+### Atividades realizadas
+
+* **Testes primeiro (TDD)**: 5 unitários novos em `src/codegen/types.rs` — o tipo de `t[1]` de
+  `[1, "a"]` é `string` (a **posição** indexada; antes o checker devolvia o tipo da primeira
+  posição — um erro real de precisão); índice calculado → `type-mismatch` em compilação;
+  constante fora do limite → `index-out-of-range` em compilação; índice dinâmico de **lista**
+  segue válido; índice sobre tipo `Any` (genérico) não verifica — + 2 de integração
+  (`emit_err`) + 1 unitário do `Diagnostic::render_as` em `src/diag/catalog.rs`.
+* **Implementação**: braço `Indexed` de `check_expr` (`types.rs`) resolve tupla posição a
+  posição, exigindo `Expr::IntLit`; `Diagnostic::render_as(phase)` (`catalog.rs`) permite fixar
+  a fase por quem reporta — o CLI renderiza `SemaError` com `render_as(Severity::Error)`, pois
+  erro de compilação é de compilação por construção, mesmo quando a entrada do catálogo é
+  "runtime" (`index-out-of-range` também existe em execução para listas).
+
+### Decisões de design
+
+* **Fase ≠ severidade da entrada**: o catálogo continua a fonte única de IDs/mensagens/dicas;
+  `render_as` só escolhe o prefixo (`error`/`failure`) conforme o reportador. Nenhuma saída
+  existente mudou (nenhum `SemaError` anterior usava código de entrada runtime).
+* **O runtime continua inalterado**: a indexação de tupla em execução já devolvia a posição
+  correta; a correção é na checagem estática (tipo da posição) e na rejeição antecipada
+  (constância/limites), como a Seção 7 exige ("relatados em tempo de compilação e não podem ser
+  capturados").
+
+### Resultado dos testes
+
+```
+cargo test --lib                → 40 passed; 0 failed (inclui 37 de codegen::types e 3 de diag)
+cargo test --test codegen_tests → 44 passed; 0 failed (42 + 2 novos)
+./scripts/run-all-tests.sh      → TUDO OK (exit 0); milestones 14/14 OK
 ```

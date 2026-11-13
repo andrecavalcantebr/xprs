@@ -19,6 +19,12 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
+* **Pós-Codegen: limitação "índice de tupla constante" FECHADA** (Seção 4.8): índice de tupla
+  precisa ser literal int — calculado é `type-mismatch` em compilação; constante fora do limite
+  é `index-out-of-range` em compilação; e `t[i]` devolve o tipo da **posição** indexada (antes
+  devolvia o da primeira posição). Para reportar `index-out-of-range` na fase de compilação
+  sem quebrar a fonte única, `Diagnostic::render_as(phase)` fixa o prefixo por quem reporta
+  (`SemaError` do CLI ⇒ `error[...]`; runtime ⇒ `failure[...]`).
 * **Pós-Codegen: limitação `cannot-infer` FECHADA (caso recursivas)** (Seção 4.10, "o tipo de
   resultado de uma função recursiva é determinado pelas ramificações que não chamam a própria
   função"): `f = fn(x){ f(x); };` e `iif(c, f(x), f(x))` são rejeitados em compilação;
@@ -92,6 +98,8 @@ Documentos: `xpr-specs.md` (especificação canônica), `plano-lexer.md` e `plan
 * `param_pattern` é obrigatório (`fn()` não existe); `fn_call` só chama `qualified_name`;
   `MultiArgCall` aponta para a vírgula; `InvalidAssignmentTarget` aponta para o `=`.
 * `edition = "2021"` (toolchain instalado: 1.75.0; edition 2024 exigiria 1.85+).
+* **Índice de tupla** (Seção 4.8): literal int obrigatório; `Diagnostic::render_as(phase)`
+  separa a fase de quem reporta (compilação × runtime) da severidade da entrada do catálogo.
 * **`cannot-infer` de recursivas** (Seção 4.10): `result_calls_self` faz análise sintática
   conservadora — só a chamada pura, o `iif` com ambas as ramificações dependentes, o `try` e a
   última expressão de bloco contam; operadores e builtins genéricos não (têm tipo próprio/`Any`
@@ -115,21 +123,20 @@ Detalhes em `RELATORIO_PROGRESSO.md`, seção "Etapa 3 — Codegen":
 2. Genéricos não geram instâncias especializadas (Seção 4.10) — funcionam via `Any`.
 3. Neutro do `try` aproximado pela forma sintática da expressão.
 4. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas.
-5. Índice de tupla não é verificado como constante.
-6. `_init`/ordem de inicialização entre módulos não implementados.
-7. Nomes privados (`_prefixo`) e `import` como statement de bloco sem a distinção exata da spec.
+5. `_init`/ordem de inicialização entre módulos não implementados.
+6. Nomes privados (`_prefixo`) e `import` como statement de bloco sem a distinção exata da spec.
 
-(Fechadas: `assign-to-constant` — ver seção "Pós-Codegen" do RELATORIO_PROGRESSO.md.)
+(Fechadas: `assign-to-constant`, `cannot-infer` de recursivas e índice de tupla constante — ver seções "Pós-Codegen" do RELATORIO_PROGRESSO.md.)
 
 ## Próxima ação concreta
 
 O processo de `AGENTS.md` (Fases 1, 2 e 3) está **completo**. Para continuar evoluindo:
 
 1. Escolher **um** item das "Limitações conhecidas" acima (sugestão de ordem por valor/esforço:
-   neutro do `try` por tipo, depois índice de tupla constante, depois `_init`/ordem de
-   inicialização, depois nomes privados — ou especialização de genéricos, que fecha o restante
-   de `cannot-infer`). `assign-to-constant` e o `cannot-infer` de recursivas já foram fechados
-   (ver "Status atual").
+   neutro do `try` por tipo, depois `_init`/ordem de inicialização, depois nomes privados —
+   ou especialização de genéricos, que fecha o restante de `cannot-infer`). Já fechados:
+   `assign-to-constant`, `cannot-infer` de recursivas e índice de tupla constante (ver "Status
+   atual").
 2. Escrever **primeiro** o teste — milestone em `tests/codegen/milestones/` (a suíte só cresce) ou
    unitário em `src/codegen/types.rs`/`tests/codegen_tests.rs` — e confirmar que ele falha.
 3. Implementar até o gate voltar a `TUDO OK`, remover a linha correspondente da lista de

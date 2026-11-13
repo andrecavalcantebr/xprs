@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use xprc::codegen::{emit_program, ModuleUnit};
-use xprc::diag::Diagnostic;
+use xprc::diag::{Diagnostic, Severity};
 use xprc::lexer::{LexError, Lexer, Token, TokenKind};
 use xprc::parser::ast::Module as AstModule;
 use xprc::parser::dump::dump_module;
@@ -130,7 +130,9 @@ fn run(args: Vec<String>) -> Result<i32, String> {
     // ---- emissão de Rust ----
     let entry_name = module_name(&source);
     let rust = emit_program(&entry_name, &modules).map_err(|err| {
-        let diagnostic = Diagnostic::new(err.code, err.detail).render();
+        // SemaError é de compilação por construção — a fase (prefixo) vem de quem reporta,
+        // não da entrada do catálogo (ex.: index-out-of-range de índice constante de tupla).
+        let diagnostic = Diagnostic::new(err.code, err.detail).render_as(Severity::Error);
         match err.span {
             Some(span) => format!(
                 "{}:{},{}: {}",

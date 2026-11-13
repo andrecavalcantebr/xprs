@@ -406,8 +406,36 @@ impl<'a> TypeChecker<'a> {
                     ty = match ty {
                         Ty::Str => Ty::Str,
                         Ty::List(inner) => (*inner).clone(),
-                        Ty::Tuple(items) => items.first().cloned().unwrap_or(Ty::Any),
-                        // Índice de tupla precisa ser constante (Seção 4.8) — verificação adiada.
+                        Ty::Tuple(items) => {
+                            // Seção 4.8: indexar uma tupla exige índice constante, verificado
+                            // em tempo de compilação — cada posição pode ter um tipo diferente.
+                            match index {
+                                Expr::IntLit(digits, _) => {
+                                    let idx: usize = digits.parse().unwrap_or(usize::MAX);
+                                    match items.get(idx) {
+                                        Some(item) => item.clone(),
+                                        None => {
+                                            return Err(self.error(
+                                                DiagCode::IndexOutOfRange,
+                                                *span,
+                                                format!(
+                                                    "índice constante {} em tupla de {} posições",
+                                                    idx,
+                                                    items.len()
+                                                ),
+                                            ))
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    return Err(self.error(
+                                        DiagCode::TypeMismatch,
+                                        *span,
+                                        "índice de tupla precisa ser um literal int constante (Seção 4.8)",
+                                    ))
+                                }
+                            }
+                        }
                         Ty::Any => Ty::Any,
                         other => {
                             return Err(self.error(
@@ -1277,5 +1305,58 @@ mod tests {
         // Só a chamada à **própria** função conta; chamar outra é o caso comum.
         let types = check("f = fn(x){ x; }; g = fn(y){ f(y); };").expect("válido");
         assert!(types.contains_key("g"));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Índice de tupla constante (Seção 4.8 / linha 642 da spec)
+    // -----------------------------------------------------------------------------------------
+
+    #[test]
+    fn indice_de_tupla_constante_devolve_o_tipo_da_posicao() {
+        // `t[1]` de `[1, "a"]` é string — o tipo é o da POSIÇÃO indexada, não o da primeira.
+        let types = check("t = [1, \"a\"]; r = t[1];").expect("válido");
+        assert_eq!(types["r"], Ty::Str);
+        // Tupla aninhada e o açúcar de vírgula (`v[a, b]` ≡ `v[a][b]`).
+        let types = check("t = [[1, \"a\"], [2, \"b\"]]; r = t[1][0];").expect("válido");
+        assert_eq!(types["r"], Ty::Int);
+        let types = check("t = [[1, \"a\"], [2, \"b\"]]; r = t[0, 1];").expect("válido");
+        assert_eq!(types["r"], Ty::Str);
+    }
+
+    #[test]
+    fn indice_de_tupla_calculado_e_type_mismatch_em_compilacao() {
+        // "Um índice calculado em uma tupla é um type-mismatch em tempo de compilação."
+        assert_eq!(
+            check_err("_main = fn(x){ t = [1, \"a\"]; i = 1; t[i]; };"),
+            DiagCode::TypeMismatch
+        );
+    }
+
+    #[test]
+    fn indice_de_tupla_constante_fora_do_limite_e_index_out_of_range() {
+        // "Um índice constante fora do limite da tupla é um index-out-of-range em tempo de
+        // compilação."
+        assert_eq!(
+            check_err("t = [1, \"a\"]; r = t[5];"),
+            DiagCode::IndexOutOfRange
+        );
+        assert_eq!(
+            check_err("t = [1, \"a\"]; r = t[2];"),
+            DiagCode::IndexOutOfRange
+        );
+    }
+
+    #[test]
+    fn indice_de_lista_continua_dinamico() {
+        // "Indexar uma lista aceita qualquer expressão int" — só a tupla exige constante.
+        let types = check("_main = fn(x){ l = [1, 2]; i = 1; r = l[i]; r; };").expect("válido");
+        assert!(types.contains_key("_main"));
+    }
+
+    #[test]
+    fn indice_sobre_tipo_any_nao_verifica_constancia() {
+        // Parâmetro genérico: a verificação acontece na especialização (limitação registrada).
+        let types = check("f = fn(xs){ xs[0]; };").expect("válido");
+        assert!(types.contains_key("f"));
     }
 }

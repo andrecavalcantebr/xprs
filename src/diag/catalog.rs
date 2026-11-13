@@ -186,6 +186,15 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn render_as_fixa_a_fase_de_quem_reporta() {
+        // index-out-of-range é "runtime" no catálogo (índice de lista), mas o compilador o
+        // reporta como erro de compilação para índice constante de tupla (Seção 4.8).
+        let d = Diagnostic::new(DiagCode::IndexOutOfRange, "índice 5 em tupla de 2 posições");
+        assert!(d.render().starts_with("failure[index-out-of-range]"));
+        assert!(d.render_as(Severity::Error).starts_with("error[index-out-of-range]"));
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -226,9 +235,16 @@ impl Diagnostic {
     /// Linha no formato usado pelo compilador e pelo runtime:
     /// `{prefixo}[{id}]: mensagem`, seguida da dica quando houver.
     pub fn render(&self) -> String {
+        self.render_as(self.code.severity())
+    }
+
+    /// Como `render`, mas com a fase fixada por **quem reporta**: um `SemaError` do compilador é
+    /// de compilação por construção (ex.: `index-out-of-range` de índice constante de tupla é um
+    /// erro de compilação, embora a entrada do catálogo seja "runtime" para o caso de listas).
+    pub fn render_as(&self, phase: Severity) -> String {
         let mut out = format!(
             "{}[{}]: {}",
-            self.code.severity().prefix(),
+            phase.prefix(),
             self.code.public_id(),
             self.message()
         );

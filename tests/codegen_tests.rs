@@ -219,6 +219,19 @@ fn emit_atribuicao_a_global_dentro_de_funcao_e_erro() {
 }
 
 #[test]
+fn emit_indice_de_tupla_calculado_e_type_mismatch() {
+    // Seção 4.8: índice de tupla precisa ser literal int constante — verificado em compilação.
+    let (code, _) = emit_err("_main = fn(x){ t = [1, \"a\"]; i = 1; t[i]; };");
+    assert_eq!(code, DiagCode::TypeMismatch);
+}
+
+#[test]
+fn emit_indice_de_tupla_constante_fora_do_limite_e_erro_de_compilacao() {
+    let (code, _) = emit_err("t = [1, \"a\"];\n_main = fn(x){ t[2]; };");
+    assert_eq!(code, DiagCode::IndexOutOfRange);
+}
+
+#[test]
 fn emit_recursao_sem_ramificacao_determinante_e_cannot_infer() {
     // Seção 4.10: função recursiva cujo resultado só vem de chamadas a si mesma é rejeitada
     // com cannot-infer, antes de qualquer emissão.
