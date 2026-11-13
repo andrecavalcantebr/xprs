@@ -183,6 +183,12 @@ pub struct TypeChecker<'a> {
     /// Tipo da expressão sob cada `try`, por span da ocorrência — o emissor usa isso para
     /// escolher o valor neutro **por tipo** (Seção 4.9), não pela forma sintática.
     pub try_types: HashMap<(u32, u32, u32, u32), Ty>,
+    /// `FnDef` de cada função genérica, por nome, para instanciar por tipo de argumento
+    /// (Seção 4.10).
+    generic_defs: HashMap<String, FnDef>,
+    /// Instâncias `(nome, tipo do argumento)` já verificadas — evita reprocessar chamadas
+    /// repetidas e impede loop infinito na instanciação de recursivas.
+    instances: std::collections::HashSet<(String, String)>,
 }
 
 /// O **valor de resultado** desta expressão depende de uma chamada à própria função sendo
@@ -232,6 +238,8 @@ impl<'a> TypeChecker<'a> {
             current: String::new(),
             pending: Vec::new(),
             try_types: HashMap::new(),
+            generic_defs: HashMap::new(),
+            instances: std::collections::HashSet::new(),
         }
     }
 
@@ -240,19 +248,26 @@ impl<'a> TypeChecker<'a> {
         self.imported.insert(alias.to_string(), members);
     }
 
-    /// Verifica um módulo inteiro e devolve os tipos das suas definições **exportadas** —
-    /// nomes com `_` inicial são privados ao módulo e não saem daqui (Seção 4.1).
+    /// Verifica um módulo inteiro e devolve os tipos das suas definições.
+    ///
+    /// Nomes com `_` inicial estão presentes no mapa (o módulo os usa internamente e o próprio
+    /// `_main` começa com `_`); a privacidade é aplicada na **fronteira de import**, por
+    /// `exported_members` — e o acesso qualificado já é rejeitado em `check_name` (Seção 4.1).
     pub fn check_module(&mut self, module: &Module) -> Result<HashMap<String, Ty>, SemaError> {
         for def in &module.definitions {
             let ty = self.check_definition(def)?;
             self.globals.insert(def.name.clone(), ty);
         }
-        Ok(self
-            .globals
+        Ok(self.globals.clone())
+    }
+
+    /// Membros visíveis de fora: os definidos no módulo, menos os privados (`_` inicial).
+    pub fn exported_members(globals: &HashMap<String, Ty>) -> HashMap<String, Ty> {
+        globals
             .iter()
             .filter(|(name, _)| !name.starts_with('_'))
             .map(|(name, ty)| (name.clone(), ty.clone()))
-            .collect())
+            .collect()
     }
 
     fn check_definition(&mut self, def: &Definition) -> Result<Ty, SemaError> {
@@ -268,7 +283,11 @@ impl<'a> TypeChecker<'a> {
         }
         self.current = def.name.clone();
         match &def.initializer {
-            Initializer::FnDef(fn_def) => self.check_fn(fn_def, Some(&def.name)),
+            Initializer::FnDef(fn_def) => {
+                // Guarda a definição para instanciar por tipo de argumento (Seção 4.10).
+                self.generic_defs.insert(def.name.clone(), (*fn_def).clone());
+                self.check_fn(fn_def, Some(&def.name))
+            }
             Initializer::ConstExpr(expr) => self.check_expr(expr),
         }
     }
@@ -592,7 +611,16 @@ impl<'a> TypeChecker<'a> {
         // Num cadeia `a = b = fn(...){...}`, todos os alvos já são nomes pendentes quando o valor
         // é uma `fn_def` (Seção 4.5).
         let mut pending = Vec::new();
-        if matches!(value, Expr::FnDef(_)) {
+        if let Expr::FnDef(fn_def) = value {
+            // Função genérica local (`f = fn(x){ … }` dentro de um corpo) também é instanciada
+            // por tipo de argumento (Seção 4.10) — registra para as chamadas seguintes.
+            for name in {
+                let mut names = Vec::new();
+                collect_names(target, &mut names);
+                names
+            } {
+                self.generic_defs.insert(name, (**fn_def).clone());
+            }
             collect_names(target, &mut pending);
             self.pending.extend(pending.clone());
         }
@@ -800,15 +828,33 @@ impl<'a> TypeChecker<'a> {
         };
         match target_ty {
             Ty::Fn(param, result) => {
-                match unify_argument(&param, &arg_ty) {
-                    Unify::Ok(_) => Ok(*result),
-                    Unify::Mismatch(detail) => Err(self.error(
-                        DiagCode::TypeMismatch,
-                        span,
-                        format!("argumento incompatível com o parâmetro ({})", detail),
-                    )),
-                    Unify::Size(detail) => Err(self.error(DiagCode::SizeMismatch, span, detail)),
+                let unified = match unify_argument(&param, &arg_ty) {
+                    Unify::Ok(unified) => unified,
+                    Unify::Mismatch(detail) => {
+                        return Err(self.error(
+                            DiagCode::TypeMismatch,
+                            span,
+                            format!("argumento incompatível com o parâmetro ({})", detail),
+                        ))
+                    }
+                    Unify::Size(detail) => {
+                        return Err(self.error(DiagCode::SizeMismatch, span, detail))
+                    }
+                };
+                // Seção 4.10: função genérica é instanciada com os tipos concretos do argumento,
+                // e o corpo é verificado **nessa** instância — `fn(x){ x + 1; }` chamada com
+                // string precisa falhar aqui, não passar por `Any`.
+                if let Expr::QualifiedName {
+                    module_alias: None,
+                    name,
+                    ..
+                } = target
+                {
+                    if let Some(instance_ty) = self.instantiate(name, &unified)? {
+                        return Ok(instance_ty);
+                    }
                 }
+                Ok(*result)
             }
             Ty::Any => Ok(Ty::Any),
             other => Err(self.error(
@@ -817,6 +863,44 @@ impl<'a> TypeChecker<'a> {
                 format!("{} não é uma função", other.name()),
             )),
         }
+    }
+
+    /// Verifica o corpo de `name` com o parâmetro ligado ao **tipo concreto** `arg_ty`
+    /// (Seção 4.10: "o compilador gera uma instância ... com os tipos de seu corpo e resultado
+    /// resolvidos para essa combinação").
+    ///
+    /// Só atua quando o tipo do parâmetro é `Any` (genérico); anotações concretas já foram
+    /// conferidas pela unificação do argumento. As instâncias verificadas são memorizadas por
+    /// `(nome, tipo)` — necessário para recursivas, que se instanciariam mutuamente sem fim.
+    fn instantiate(&mut self, name: &str, arg_ty: &Ty) -> Result<Option<Ty>, SemaError> {
+        let fn_def = match self.generic_defs.get(name) {
+            Some(def) => def.clone(),
+            None => return Ok(None),
+        };
+        // Anotado: não é genérica nesta posição (o corpo já foi checado com o tipo da anotação).
+        if !matches!(fn_def.param, ParamPattern::Name { ty: None, .. }) {
+            return Ok(None);
+        }
+        let concrete = match arg_ty {
+            Ty::Any => return Ok(None),
+            ty => ty.clone(),
+        };
+        // Instância já verificada (ou em andamento): reusa o resultado da definição. Marcar
+        // **antes** de rechecar é o que impede a recursiva de se instanciar sem fim.
+        if !self
+            .instances
+            .insert((name.to_string(), concrete.name()))
+        {
+            return Ok(Some(Ty::Any));
+        }
+        self.scopes.push(HashMap::new());
+        if let ParamPattern::Name { name: param, .. } = &fn_def.param {
+            self.declare(param, concrete);
+        }
+        let result = self.check_block(&fn_def.body);
+        self.scopes.pop();
+        let result_ty = result?;
+        Ok(Some(result_ty))
     }
 
     fn check_builtin(
@@ -1384,5 +1468,62 @@ mod tests {
         // Parâmetro genérico: a verificação acontece na especialização (limitação registrada).
         let types = check("f = fn(xs){ xs[0]; };").expect("válido");
         assert!(types.contains_key("f"));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Especialização de genéricos (Seção 4.10): o corpo é verificado por combinação de tipos
+    // -----------------------------------------------------------------------------------------
+
+    #[test]
+    fn generic_instanciada_rejeita_corpo_invalido_para_o_argumento() {
+        // "O compilador gera uma instância da função para cada combinação distinta de tipos de
+        // argumentos concretos, com os tipos de seu corpo e resultado resolvidos para essa
+        // combinação." Instância string de `x + 1` é type-mismatch (Seção 5.2).
+        assert_eq!(
+            check_err("_main = fn(a){ f = fn(x){ x + 1; }; f(\"a\"); };"),
+            DiagCode::TypeMismatch
+        );
+        // O mesmo vale para função genérica de nível superior.
+        assert_eq!(
+            check_err("f = fn(x){ x * 2; }; _main = fn(a){ f(\"s\"); };"),
+            DiagCode::TypeMismatch
+        );
+    }
+
+    #[test]
+    fn generic_aceita_cada_tipo_que_o_corpo_suporta() {
+        // M8: `identidade` com int e com string são instâncias distintas, ambas válidas.
+        let types = check(
+            "_main = fn(a){ identidade = fn(x){ x; }; identidade(1); identidade(\"abc\"); 0; };",
+        )
+        .expect("válido");
+        assert!(types.contains_key("_main"));
+    }
+
+    #[test]
+    fn generic_recursiva_nao_entra_em_loop_de_instanciacao() {
+        let types = check(
+            "_main = fn(a){ fat = fn(x){ iif(x <= 1, 1, x * fat(x - 1)); }; fat(5); };",
+        )
+        .expect("válido");
+        assert!(types.contains_key("_main"));
+    }
+
+    #[test]
+    fn generic_propaga_o_tipo_concreto_da_instancia() {
+        // `f(3)` na instância int tem tipo int: somar string é erro (antes era `Any`, passava).
+        assert_eq!(
+            check_err("_main = fn(a){ f = fn(x){ x; }; r = f(3); r + \"s\"; };"),
+            DiagCode::TypeMismatch
+        );
+    }
+
+    #[test]
+    fn parametro_anotado_continua_sem_instanciacao() {
+        // `fn(x:int)` não é genérica: a chamada com string já falha na unificação do argumento.
+        assert_eq!(
+            check_err("_main = fn(a){ f = fn(x:int){ x + 1; }; f(\"a\"); };"),
+            DiagCode::TypeMismatch
+        );
     }
 }

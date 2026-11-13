@@ -314,8 +314,9 @@ vinculando `libxpr_rt.rlib` (compilada sob demanda e cacheada em `xpr_rt/target/
 
 1. **`cannot-infer` — PARCIALMENTE FECHADO na subetapa pós-Codegen** (ver seção "Pós-Codegen:
    fechamento de `cannot-infer` (recursivas)" abaixo): recursão sem ramificação determinante é
-   rejeitada. Seguem abertos, por dependerem da especialização de genéricos: uso como valor sem
-   contexto (linha 725 da spec) e `apply` com `[]` literal (linha 816).
+   rejeitada. A especialização de genéricos foi implementada depois (seção "Pós-Codegen:
+   especialização de genéricos"); seguem abertos apenas os casos em que o nome é usado **como
+   valor** sem contexto concreto (linha 725 da spec) e `apply` com `[]` literal (linha 816).
 2. **`assign-to-constant` — FECHADO na subetapa pós-Codegen** (ver seção "Pós-Codegen:
    fechamento de `assign-to-constant`" abaixo). Constantes predefinidas e nomes de nível
    superior (dentro de funções) passaram a ser somente leitura, com `PI`/`e` adicionados como
@@ -612,4 +613,51 @@ Sexta limitação fechada, mesmo processo (teste primeiro → implementação �
 cargo test --lib                → 40 passed; 0 failed
 cargo test --test codegen_tests → 52 passed; 0 failed (50 + 2 novos)
 ./scripts/run-all-tests.sh      → TUDO OK (exit 0); milestones 15/15 OK
+```
+
+---
+
+## Pós-Codegen: especialização de genéricos (Seção 4.10)
+
+Sétima limitação fechada. **Inclui um incidente de processo** (ver "Incidente" abaixo).
+
+### Atividades realizadas
+
+* **Testes primeiro (TDD)**: 5 unitários novos (instância rejeita corpo inválido para o
+  argumento, tanto em função local quanto de módulo; cada tipo aceito gera instância válida —
+  caso M8; recursiva não entra em loop; o **resultado** da chamada herda o tipo da instância;
+  parâmetro anotado não passa por instanciação) + 1 de integração. Confirmado: falhavam antes.
+* **Implementação** (`src/codegen/types.rs`, emissor intocado): `generic_defs` registra a
+  `FnDef` de cada função genérica (nível de módulo em `check_definition`, local em
+  `check_assignment`); `check_call` chama `instantiate(nome, tipo_unificado_do_argumento)`, que
+  empurra um escopo, declara o parâmetro com o tipo **concreto**, recheca o corpo e devolve o
+  tipo de resultado da instância (que a chamada propaga em vez do `Any` da definição).
+  Memoização `(nome, tipo)` inserida **antes** do re-cheque — guarda de reentrância.
+
+### Decisões de design
+
+* **O backend dinâmico dispensa código por instância**: valores são `Value` com `Rc`, então
+  "gerar uma instância" no sentido da spec se traduz em **verificar o corpo por combinação de
+  tipos**; o Rust emitido já é único. Fechar a lacuna era, portanto, trabalho de checagem.
+* **A guarda de reentrância vem antes da verificação**: memoizar depois fazia a recursiva
+  (`fat(5)` → corpo chama `fat(x-1)` → `instantiate`) reentrar sem fim e estourar a pilha do
+  processo de teste (SIGABRT). A instância "em andamento" devolve `Any` para a chamada interna,
+  que é o comportamento correto: o tipo dela é o que está sendo calculado.
+
+### Incidente (processo — regressão que o gate não pegou)
+
+A subetapa anterior (nomes privados) fez `check_module` filtrar nomes com `_` inicial. Como
+`_main` começa com `_`, **8 testes unitários quebraram** (`types.contains_key("_main")` deixou de
+valer) — e passaram desapercebidos porque `scripts/run-all-tests.sh` **nunca rodava
+`cargo test`**, só lexer/parser/milestones. Correções: (a) o gate agora roda `cargo test` antes
+dos milestones; (b) o filtro de privados foi movido para a fronteira de import
+(`TypeChecker::exported_members`), deixando `check_module` devolver o mapa completo. O erro foi
+detectado nesta subetapa porque o oráculo dos testes novos é o mesmo `check_module`.
+
+### Resultado dos testes
+
+```
+cargo test --lib                → 45 passed; 0 failed
+cargo test --test codegen_tests → 53 passed; 0 failed (52 + 1 novo)
+./scripts/run-all-tests.sh      → TUDO OK (exit 0); milestones 15/15 OK — agora rodando cargo test
 ```

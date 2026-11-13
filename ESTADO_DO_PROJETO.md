@@ -19,6 +19,16 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
+* **Pós-Codegen: limitação "especialização de genéricos" FECHADA** (Seção 4.10): `fn(x){ x + 1; }`
+  chamada com string agora é `type-mismatch` — o corpo é re-verificado por instância
+  (`instantiate`, com o parâmetro ligado ao tipo concreto do argumento) e o **resultado** da
+  chamada é o da instância (`f(3)` tem tipo int, não `Any`). Instâncias memoizadas por
+  `(nome, tipo)` **antes** de re-checar, senão a recursiva se instancia sem fim. Backend é
+  dinâmico, então não há código por instância — a entrega é de verificação.
+* **Corrigido o gate**: `run-all-tests.sh` não rodava `cargo test` (só lexer/parser/milestones),
+  e foi por isso que uma regressão minha na subetapa de privacidade (`check_module` filtrando
+  `_main`, quebrando 8 unitários) passou. O gate agora roda `cargo test` e o filtro de privados
+  foi movido para a fronteira de import (`TypeChecker::exported_members`).
 * **Pós-Codegen: limitação "nomes privados" FECHADA** (Seção 4.1): nome iniciado por `_` é
   privado ao módulo — `alias._nome` de fora é `undefined-identifier` (checado em `check_name` e,
   defensivamente, em `emit_name`); `check_module` deixa de exportar nomes privados; o uso sem
@@ -115,6 +125,11 @@ Documentos: `xpr-specs.md` (especificação canônica), `plano-lexer.md` e `plan
 * `param_pattern` é obrigatório (`fn()` não existe); `fn_call` só chama `qualified_name`;
   `MultiArgCall` aponta para a vírgula; `InvalidAssignmentTarget` aponta para o `=`.
 * `edition = "2021"` (toolchain instalado: 1.75.0; edition 2024 exigiria 1.85+).
+* **Especialização de genéricos** (Seção 4.10): `instantiate(nome, tipo_do_argumento)` recheca o
+  corpo com o parâmetro no tipo concreto e devolve o tipo de resultado da instância; memoização
+  `(nome, tipo)` **antes** do re-cheque (guarda de reentrância para recursivas).
+* **Privacidade na fronteira de import**: `check_module` devolve todos os nomes (o oráculo dos
+  testes unitários depende de `_main`); quem esconde os privados é `exported_members`.
 * **Nomes privados** (Seção 4.1): `_` inicial = privado ao módulo; a checagem é no
   `check_name`/`emit_name` do acesso qualificado, e `check_module` não exporta privados.
 * **`_init`** (Seção 4.1): emitido no `main` gerado na ordem de `modules` (já pós-ordem DFS do
@@ -141,15 +156,16 @@ em vez de simplesmente revertê-la.
 
 Detalhes em `RELATORIO_PROGRESSO.md`, seção "Etapa 3 — Codegen":
 
-1. `cannot-infer` **parcialmente fechado** (recursivas sem ramificação determinante); os
-   casos de genérico (uso como valor sem contexto; `apply` com `[]`) dependem da especialização
-   da limitação 2.
-2. Genéricos não geram instâncias especializadas (Seção 4.10) — funcionam via `Any`.
-3. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas.
+1. `cannot-infer` no caso "uso como valor sem contexto determinar A" (linha 725) e "`apply`
+   com `[]` literal" (linha 816): a instanciação cobre chamadas diretas, não o uso do nome como
+   valor sem contexto concreto.
+2. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas
+   (o exemplo `0.001 → 1.00e-3` da spec é batido; a regra geral da mantissa é ambígua na própria
+   spec — exige decisão antes de mexer).
 
 (Fechadas: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla constante, neutro
-do `try` por tipo, `_init`/ordem de inicialização e nomes privados — ver seções "Pós-Codegen" do
-RELATORIO_PROGRESSO.md. Pendência de decisão da spec: "definir o mesmo nome duas vezes é erro"
+do `try` por tipo, `_init`/ordem de inicialização, nomes privados e especialização de genéricos —
+ver seções "Pós-Codegen" do RELATORIO_PROGRESSO.md. Pendência de decisão da spec: "definir o mesmo nome duas vezes é erro"
 (Seção 4.1) × redefinição no nível de módulo (Seção 4.5 e milestone M4).)
 
 ## Próxima ação concreta
@@ -157,9 +173,8 @@ RELATORIO_PROGRESSO.md. Pendência de decisão da spec: "definir o mesmo nome du
 O processo de `AGENTS.md` (Fases 1, 2 e 3) está **completo**. Para continuar evoluindo:
 
 1. Escolher **um** item das "Limitações conhecidas" acima (sugestão de ordem por valor/esforço:
-   especialização de genéricos, que fecha o restante de `cannot-infer`). **Todas as demais
-   limitações foram fechadas** (ver "Status atual"); o passo 1 agora é escolher entre
-   especialização de genéricos e formatação científica.
+   formatação científica, ou fechar o restante de `cannot-infer` (uso como valor / `apply`
+   com `[]`, que já têm a instanciação pronta como base).
 2. Escrever **primeiro** o teste — milestone em `tests/codegen/milestones/` (a suíte só cresce) ou
    unitário em `src/codegen/types.rs`/`tests/codegen_tests.rs` — e confirmar que ele falha.
 3. Implementar até o gate voltar a `TUDO OK`, remover a linha correspondente da lista de

@@ -256,6 +256,13 @@ fn compile_and_run_files(name: &str, files: &[(&str, &str)]) -> (String, i32, St
 }
 
 #[test]
+fn emit_generic_com_corpo_invalido_para_a_instancia_e_erro() {
+    // Seção 4.10: a instância resolve os tipos do corpo — `x + 1` com string é type-mismatch.
+    let (code, _) = emit_err("f = fn(x){ x + 1; };\n_main = fn(a){ f(\"s\"); };");
+    assert_eq!(code, DiagCode::TypeMismatch);
+}
+
+#[test]
 fn emit_membro_privado_nao_pode_ser_acessado_de_fora() {
     // Seção 4.1: "acessar `alias._nome` de fora gera um erro de compilação" — `_` é o único
     // mecanismo de visibilidade da linguagem.

@@ -200,7 +200,11 @@ fn check_types(
                 }
             }
             if let Ok(members) = checker.check_module(&unit.ast) {
-                exported.insert(unit.name.clone(), members);
+                // Seção 4.1: na fronteira de import só os nomes públicos atravessam.
+                exported.insert(
+                    unit.name.clone(),
+                    TypeChecker::exported_members(&members),
+                );
             }
         }
     }
