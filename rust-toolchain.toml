@@ -1,0 +1,14 @@
+# Fixação da toolchain (lido automaticamente por rustup/cargo).
+#
+# A versão exata é fixada para que o build seja reprodutível em qualquer máquina e na CI: quem
+# tiver rustup instalado recebe esta toolchain automaticamente ao rodar cargo nesta pasta.
+#
+# Para atualizar: troque `channel` abaixo e rode `./scripts/run-all-tests.sh` (o gate completo)
+# antes de commitar — a versão é um contrato, não um detalhe.
+[toolchain]
+channel = "1.100.0"
+# Componentes usados pelo projeto: o gate roda `cargo build`/`cargo test`; rustfmt e clippy ficam
+# disponíveis para formatar/lintar, mas não são exigidos pelos scripts.
+components = ["rustfmt", "clippy"]
+# Perfil mínimo: sem docs/ferramentas extras que o projeto não usa.
+profile = "minimal"
