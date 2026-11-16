@@ -692,6 +692,23 @@ impl<'a> TypeChecker<'a> {
     ) -> Result<Ty, SemaError> {
         let left = self.check_expr(lhs)?;
         let right = self.check_expr(rhs)?;
+        self.binary_types(op, &left, &right, span)
+    }
+
+    /// Tipo do resultado de uma operação binária, a partir dos tipos dos operandos.
+    ///
+    /// Separada de [`Self::check_binary`] porque `+` precisa recursar em listas e tuplas (Seção
+    /// 4.8): a decisão numérico-vs-string só pode ser tomada na **folha**, já que `List(Str)` não é
+    /// `Ty::Str`.
+    fn binary_types(
+        &mut self,
+        op: BinOp,
+        left_ty: &Ty,
+        right_ty: &Ty,
+        span: Span,
+    ) -> Result<Ty, SemaError> {
+        let left = left_ty.clone();
+        let right = right_ty.clone();
         let symbol = op.symbol();
         match op {
             BinOp::EqEq | BinOp::NotEq => {
@@ -737,7 +754,35 @@ impl<'a> TypeChecker<'a> {
                 }
             }
             BinOp::Add => {
-                // `+` é soma numérica ou concatenação de strings (e elemento a elemento).
+                // `+` é soma numérica ou concatenação de strings, recursivamente em listas e
+                // tuplas. A decisão numérico-vs-string precisa ser feita **depois** de descer nas
+                // estruturas: `List(Str)` não é `Ty::Str`, e tratar antes mandava a folha string
+                // para `numeric_binary`, que só aceita numérico (bug da Seção 4.8).
+                match (&left, &right) {
+                    (Ty::List(a), Ty::List(b)) => {
+                        let inner = self.binary_types(BinOp::Add, a, b, span)?;
+                        return Ok(Ty::List(Box::new(inner)));
+                    }
+                    (Ty::Tuple(a), Ty::Tuple(b)) => {
+                        if a.len() != b.len() {
+                            return Err(self.error(
+                                DiagCode::SizeMismatch,
+                                span,
+                                format!(
+                                    "+ entre tuplas de tamanhos {} e {}",
+                                    a.len(),
+                                    b.len()
+                                ),
+                            ));
+                        }
+                        let mut items = Vec::with_capacity(a.len());
+                        for (left_item, right_item) in a.iter().zip(b.iter()) {
+                            items.push(self.binary_types(BinOp::Add, left_item, right_item, span)?);
+                        }
+                        return Ok(Ty::Tuple(items));
+                    }
+                    _ => {}
+                }
                 if matches!(left, Ty::Str) || matches!(right, Ty::Str) {
                     match (&left, &right) {
                         (Ty::Str, Ty::Str) | (Ty::Any, _) | (_, Ty::Any) => Ok(Ty::Str),
@@ -1668,6 +1713,51 @@ mod tests {
             DiagCode::TypeMismatch
         );
         // Controle: a mesma lista somada a uma string-lista é válida (`[string] + [string]`).
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // `+` recursivo: folhas numéricas somam, folhas string concatenam (Seção 4.8)
+    // -----------------------------------------------------------------------------------------
+
+    #[test]
+    fn add_recursivo_concatena_folhas_string_em_listas() {
+        // Regressão: `["a"] + ["b"]` dava type-mismatch, porque o teste de `Ty::Str` era feito
+        // antes de recursar em `List`, e a folha string caía em `numeric_binary`.
+        assert!(check("_main = fn(a){ [\"a\"] + [\"b\"]; };").is_ok());
+        assert!(check("_main = fn(a){ [\"a\", \"b\"] + [\"1\", \"2\"]; };").is_ok());
+        // Exemplo literal da spec (Seção 4.8): `[1, "a"] + [2, "b"]` -> `[3, "ab"]`.
+        assert!(check("_main = fn(a){ [1, \"a\"] + [2, \"b\"]; };").is_ok());
+    }
+
+    #[test]
+    fn add_recursivo_mantem_soma_numerica_em_listas() {
+        assert!(check("_main = fn(a){ [1] + [2]; };").is_ok());
+        assert!(check("_main = fn(a){ [[1],[2]] + [[3],[4]]; };").is_ok());
+        assert!(check("_main = fn(a){ [1.5] + [2]; };").is_ok());
+    }
+
+    #[test]
+    fn add_recursivo_rejeita_folhas_incompativeis() {
+        // int com string na mesma posição continua sendo erro.
+        assert_eq!(
+            check_err("_main = fn(a){ [1] + [\"b\"]; };"),
+            DiagCode::TypeMismatch
+        );
+        // bool não soma nem concatena.
+        assert_eq!(
+            check_err("_main = fn(a){ [true] + [false]; };"),
+            DiagCode::TypeMismatch
+        );
+    }
+
+    #[test]
+    fn sub_continua_numerico_em_listas_de_string() {
+        // `-` não concatena: folha string em `-` é type-mismatch (Seção 4.8).
+        assert_eq!(
+            check_err("_main = fn(a){ [\"a\"] - [\"b\"]; };"),
+            DiagCode::TypeMismatch
+        );
+        assert!(check("_main = fn(a){ [1] - [2]; };").is_ok());
     }
 }
 

@@ -331,12 +331,10 @@ pub fn format_real(x: f64, format: Format) -> String {
     if magnitude == 0.0 || (magnitude >= lower && magnitude < upper) {
         return format!("{:.*}", decimals, x);
     }
-    // Notação científica com `alg_significativos` dígitos significativos. A spec exemplifica
-    // `0.001` como `1.00e-3` (três significativos, como no `%g` de C), então o número de dígitos
-    // após o ponto é `significant - 1` **limitado** pelo mínimo necessário para o exemplo: usamos
-    // `significant - 1` apenas quando ele é menor que 15, senão 2 (o padrão de 15 significativos
-    // não deve inflar a mantissa). Ver limitação registrada no RELATORIO_PROGRESSO.md.
-    let digits = if significant >= 15 { 2 } else { significant.saturating_sub(1) };
+    // Notação científica com exatamente `alg_significativos` dígitos significativos: o primeiro
+    // dígito é o da mantissa e os demais vêm após o ponto, portanto `significant - 1` casas
+    // (Seção 5.1). `significant >= 1` já foi validado em `format`; o `max(1)` é defensivo.
+    let digits = significant.saturating_sub(1).max(0);
     let text = format!("{:.*e}", digits, x);
     match text.split_once('e') {
         Some((mantissa, exponent)) => {
@@ -498,5 +496,52 @@ pub fn force(result: XprResult) -> Value {
             eprintln!("{}", fail.render());
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::{format_real, Format};
+
+    fn f(x: f64, decimals: i64, significant: i64) -> String {
+        format_real(x, Format { decimals, significant })
+    }
+
+    #[test]
+    fn zero_e_sempre_notacao_fixa() {
+        // O zero caía na científica pela condição `10^-decimais <= |x|`. Deve ser fixo.
+        assert_eq!(f(0.0, 2, 15), "0.00");
+        assert_eq!(f(0.0, 4, 15), "0.0000");
+        assert_eq!(f(-0.0, 2, 15), "-0.00");
+    }
+
+    #[test]
+    fn cientifica_usa_alg_significativos() {
+        // 3 significativos => 2 dígitos após o ponto na mantissa.
+        assert_eq!(f(1234567890123456789.0, 2, 3), "1.23e+18");
+        // 15 significativos => 14 dígitos após o ponto.
+        assert_eq!(f(1234567890123456789.0, 2, 15), "1.23456789012346e+18");
+        // 1 significativo => nenhum dígito após o ponto.
+        assert_eq!(f(1234567890123456789.0, 2, 1), "1e+18");
+    }
+
+    #[test]
+    fn exemplo_0_001_com_2_significativos() {
+        assert_eq!(f(0.001, 2, 2), "1.0e-3");
+        assert_eq!(f(0.001, 2, 3), "1.00e-3");
+    }
+
+    #[test]
+    fn notacao_fixa_no_intervalo() {
+        assert_eq!(f(20.0, 2, 15), "20.00");
+        assert_eq!(f(1.25, 2, 15), "1.25");
+        assert_eq!(f(0.5, 2, 15), "0.50");
+    }
+
+    #[test]
+    fn nan_e_infinitos_ignoram_formato() {
+        assert_eq!(f(f64::NAN, 2, 15), "NaN");
+        assert_eq!(f(f64::INFINITY, 2, 15), "INF");
+        assert_eq!(f(f64::NEG_INFINITY, 2, 15), "-INF");
     }
 }
