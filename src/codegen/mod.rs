@@ -54,8 +54,8 @@ impl SemaError {
 
 /// Nomes dos builtins da Seção 5.
 pub const BUILTINS: &[&str] = &[
-    "print", "println", "len", "input", "fail", "string", "format", "int", "real", "floor",
-    "ceil", "round", "frac", "any", "all", "cat", "at", "fill", "range", "set", "slice", "apply",
+    "print", "println", "len", "input", "fail", "string", "format", "int", "real", "floor", "ceil",
+    "round", "frac", "any", "all", "cat", "at", "fill", "range", "set", "slice", "apply",
 ];
 
 /// Constantes predefinidas da Seção 6.
@@ -84,10 +84,7 @@ fn neutral_of_ty(ty: &Ty) -> Option<String> {
             for item in items {
                 parts.push(neutral_of_ty(item)?);
             }
-            Some(format!(
-                "xpr_rt::Value::seq(vec![{}])",
-                parts.join(", ")
-            ))
+            Some(format!("xpr_rt::Value::seq(vec![{}])", parts.join(", ")))
         }
         Ty::Any | Ty::Fn(_, _) => None,
     }
@@ -113,6 +110,54 @@ pub struct ModuleUnit {
     pub ast: Module,
 }
 
+const RT_CATALOG: &str = include_str!("../diag/catalog.rs");
+const RT_LIB: &str = include_str!("../../xpr_rt/src/lib.rs");
+const RT_OPS: &str = include_str!("../../xpr_rt/src/ops.rs");
+const RT_BI: &str = include_str!("../../xpr_rt/src/bi.rs");
+
+fn strip_inner_docs_and_tests(src: &str) -> String {
+    let mut out = String::with_capacity(src.len());
+    let mut skipping_test = false;
+    let mut depth: i32 = 0;
+    for line in src.lines() {
+        let trimmed = line.trim_start();
+        if skipping_test {
+            depth += line.matches('{').count() as i32;
+            depth -= line.matches('}').count() as i32;
+            if depth <= 0 && line.contains('}') {
+                skipping_test = false;
+            }
+            continue;
+        }
+        if trimmed == "#[cfg(test)]" {
+            skipping_test = true;
+            depth = 0;
+            continue;
+        }
+        if trimmed.starts_with("//!") {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+fn emit_embedded_runtime() -> String {
+    let catalog = strip_inner_docs_and_tests(RT_CATALOG);
+    let ops = strip_inner_docs_and_tests(RT_OPS).replace("crate::", "super::");
+    let bi = strip_inner_docs_and_tests(RT_BI).replace("crate::", "super::");
+    let lib = strip_inner_docs_and_tests(RT_LIB)
+        .replace("crate::", "self::")
+        .replace(
+            "#[path = \"../../src/diag/catalog.rs\"]\npub mod catalog;",
+            &format!("pub mod catalog {{\n{}\n}}", catalog),
+        )
+        .replace("pub mod bi;", &format!("pub mod bi {{\n{}\n}}", bi))
+        .replace("pub mod ops;", &format!("pub mod ops {{\n{}\n}}", ops));
+    format!("mod xpr_rt {{\n{}\n}}\n\n", lib)
+}
+
 /// Gera o código Rust completo de um programa (módulo de entrada + imports).
 pub fn emit_program(entry: &str, modules: &[ModuleUnit]) -> Result<String, SemaError> {
     let try_types = check_types(entry, modules)?;
@@ -120,7 +165,8 @@ pub fn emit_program(entry: &str, modules: &[ModuleUnit]) -> Result<String, SemaE
     let mut out = String::new();
     out.push_str("// Gerado por xprc — não edite.\n");
     out.push_str("#![allow(clippy::all, unused_variables, unused_mut, dead_code)]\n");
-    out.push_str("use xpr_rt::{self, Value, XprResult};\n\n");
+    out.push_str(&emit_embedded_runtime());
+    out.push_str("use xpr_rt::{Value, XprResult};\n\n");
 
     for unit in modules {
         let unit_try_types = try_types.get(&unit.name).cloned().unwrap_or_default();
@@ -133,7 +179,12 @@ pub fn emit_program(entry: &str, modules: &[ModuleUnit]) -> Result<String, SemaE
         .find(|unit| unit.name == entry)
         .expect("módulo de entrada ausente");
     let entry_mod = rust_module_name(&entry_unit.name);
-    if !entry_unit.ast.definitions.iter().any(|def| def.name == "_main") {
+    if !entry_unit
+        .ast
+        .definitions
+        .iter()
+        .any(|def| def.name == "_main")
+    {
         return Err(SemaError {
             code: DiagCode::MissingMain,
             span: None,
@@ -159,19 +210,19 @@ pub fn emit_program(entry: &str, modules: &[ModuleUnit]) -> Result<String, SemaE
             ));
         }
     }
-    if entry_unit.ast.definitions.iter().any(|def| def.name == "_init") {
+    if entry_unit
+        .ast
+        .definitions
+        .iter()
+        .any(|def| def.name == "_init")
+    {
         out.push_str(&format!(
             "        let _ = xpr_rt::force(xpr_rt::call({}::_init(), xpr_rt::Value::seq(vec![]), None));\n",
             entry_mod
         ));
     }
-    out.push_str(&format!(
-        "        let __entry = {}::_main();\n",
-        entry_mod
-    ));
-    out.push_str(
-        "        xpr_rt::finish(xpr_rt::call(__entry, xpr_rt::program_args(), None));\n",
-    );
+    out.push_str(&format!("        let __entry = {}::_main();\n", entry_mod));
+    out.push_str("        xpr_rt::finish(xpr_rt::call(__entry, xpr_rt::program_args(), None));\n");
     out.push_str("    });\n");
     out.push_str("}\n");
     Ok(out)
@@ -201,10 +252,7 @@ fn check_types(
             }
             if let Ok(members) = checker.check_module(&unit.ast) {
                 // Seção 4.1: na fronteira de import só os nomes públicos atravessam.
-                exported.insert(
-                    unit.name.clone(),
-                    TypeChecker::exported_members(&members),
-                );
+                exported.insert(unit.name.clone(), TypeChecker::exported_members(&members));
             }
         }
     }
@@ -348,15 +396,19 @@ impl<'a> Emitter<'a> {
     /// Emite `pub fn <nome>() -> Value { … }`.
     fn emit_definition(&mut self, def: &Definition) -> Result<String, SemaError> {
         let mut out = String::new();
-        out.push_str(&format!("    pub fn {}() -> Value {{\n", sanitize_ident(&def.name)));
+        out.push_str(&format!(
+            "    pub fn {}() -> Value {{\n",
+            sanitize_ident(&def.name)
+        ));
         let body = match &def.initializer {
-            Initializer::FnDef(fn_def) => {
-                self.emit_fn_def(fn_def, Some(&def.name), def.span)?
-            }
+            Initializer::FnDef(fn_def) => self.emit_fn_def(fn_def, Some(&def.name), def.span)?,
             Initializer::ConstExpr(expr) => self.emit_expr(expr)?,
         };
         // O corpo é um bloco cujo valor é `XprResult`; definições de módulo expõem o `Value`.
-        out.push_str(&format!("        xpr_rt::force({})\n", indent(&body, 2).trim_end()));
+        out.push_str(&format!(
+            "        xpr_rt::force({})\n",
+            indent(&body, 2).trim_end()
+        ));
         out.push_str("    }\n");
         Ok(out)
     }
@@ -376,17 +428,20 @@ impl<'a> Emitter<'a> {
                 let value: f64 = text.parse().unwrap_or(0.0);
                 Ok(format!("Ok(xpr_rt::Value::Real({:?}))", value))
             }
-            Expr::StringLit(decoded, _, _) => {
-                Ok(format!("Ok(xpr_rt::Value::string({}))", rust_string(decoded)))
-            }
+            Expr::StringLit(decoded, _, _) => Ok(format!(
+                "Ok(xpr_rt::Value::string({}))",
+                rust_string(decoded)
+            )),
             Expr::QualifiedName {
                 module_alias,
                 name,
                 span,
             } => self.emit_name(module_alias.as_deref(), name, *span),
-            Expr::Assignment { target, value, span } => {
-                self.emit_assignment(target, value, *span)
-            }
+            Expr::Assignment {
+                target,
+                value,
+                span,
+            } => self.emit_assignment(target, value, *span),
             Expr::FnDef(fn_def) => self.emit_fn_def(fn_def, None, fn_def.span),
             Expr::LogicalOr(operands) => self.emit_chain(operands, true),
             Expr::LogicalAnd(operands) => self.emit_chain(operands, false),
@@ -398,12 +453,7 @@ impl<'a> Emitter<'a> {
                     self.position(*span)
                 ))
             }
-            Expr::Binary {
-                op,
-                lhs,
-                rhs,
-                span,
-            } => {
+            Expr::Binary { op, lhs, rhs, span } => {
                 let left = self.emit_expr(lhs)?;
                 let right = self.emit_expr(rhs)?;
                 let func = match op {
@@ -428,10 +478,7 @@ impl<'a> Emitter<'a> {
                 ))
             }
             Expr::Unary {
-                op,
-                operand,
-                span,
-                ..
+                op, operand, span, ..
             } => {
                 let inner = self.emit_expr(operand)?;
                 let func = match op {
@@ -455,7 +502,11 @@ impl<'a> Emitter<'a> {
                 // exatamente um `XprResult` (e não um `Value` com `?` sobrando).
                 let mut out = String::from("{\n");
                 let current = self.fresh("base");
-                out.push_str(&format!("  let {} = {{ {} }}?;\n", current, self.emit_expr(base)?));
+                out.push_str(&format!(
+                    "  let {} = {{ {} }}?;\n",
+                    current,
+                    self.emit_expr(base)?
+                ));
                 let mut current = current;
                 for index in indices {
                     let index_ident = self.fresh("i");
@@ -608,7 +659,7 @@ impl<'a> Emitter<'a> {
                         DiagCode::UndefinedIdentifier,
                         span,
                         format!("o alias de módulo {}", alias),
-                    ))
+                    ));
                 }
             };
             return Ok(format!("Ok({}::{}())", module, sanitize_ident(name)));
@@ -677,7 +728,7 @@ impl<'a> Emitter<'a> {
                             DiagCode::AssignToCaptured,
                             *name_span,
                             format!("{} (em {})", name, self.file),
-                        ))
+                        ));
                     }
                     Some(Binding::Pending(_)) => {
                         // Fim do "nome pendente": agora o valor existe e vira uma variável local
@@ -730,7 +781,11 @@ impl<'a> Emitter<'a> {
         }
         let rest = self.emit_chain(&operands[1..], is_or)?;
         let temp = self.fresh("l");
-        let (short_circuit, continuation) = if is_or { ("true", "false") } else { ("false", "true") };
+        let (short_circuit, continuation) = if is_or {
+            ("true", "false")
+        } else {
+            ("false", "true")
+        };
         Ok(format!(
             "{{\n  let {} = {{ {} }}?;\n  if xpr_rt::as_bool(&{}, None)? == {} {{\n    Ok(xpr_rt::Value::Bool({}))\n  }} else {{\n    {}\n  }}\n}}",
             temp,
@@ -763,7 +818,7 @@ impl<'a> Emitter<'a> {
                             code: DiagCode::SyntaxError,
                             span: Some(block.span),
                             detail: "import dentro de bloco".to_string(),
-                        })
+                        });
                     }
                 };
                 out.push_str(&indent(&code, 1));
@@ -810,12 +865,14 @@ impl<'a> Emitter<'a> {
         expr: &Expr,
     ) -> Result<String, SemaError> {
         match expr {
-            Expr::Assignment { target, value, span } => {
+            Expr::Assignment {
+                target,
+                value,
+                span,
+            } => {
                 // A cadeia é associativa à direita: primeiro resolve o valor mais à direita...
                 let inner = match value.as_ref() {
-                    Expr::Assignment { .. } => {
-                        Some(self.emit_assignment_spine(out, value)?)
-                    }
+                    Expr::Assignment { .. } => Some(self.emit_assignment_spine(out, value)?),
                     other => {
                         // Se o valor é uma `fn_def`, os alvos da cadeia já são "nomes pendentes"
                         // antes de o valor existir (Seção 4.5): a função pode se auto-referenciar.
@@ -824,10 +881,10 @@ impl<'a> Emitter<'a> {
                             collect_target_names(target, &mut pending);
                         }
                         for name in &pending {
-                            self.scopes.last_mut().unwrap().insert(
-                                name.clone(),
-                                Binding::Pending("__self".to_string()),
-                            );
+                            self.scopes
+                                .last_mut()
+                                .unwrap()
+                                .insert(name.clone(), Binding::Pending("__self".to_string()));
                         }
                         let saved = std::mem::replace(&mut self.pending_self, pending.clone());
                         let emitted = self.emit_expr(other);
@@ -918,7 +975,9 @@ impl<'a> Emitter<'a> {
                     "input" => format!("xpr_rt::bi::input({}, {})", arg_code, self.position(span)),
                     "fail" => format!("xpr_rt::bi::fail({}, {})", arg_code, self.position(span)),
                     "string" => format!("xpr_rt::bi::to_string({})", arg_code),
-                    "format" => format!("xpr_rt::bi::format({}, {})", arg_code, self.position(span)),
+                    "format" => {
+                        format!("xpr_rt::bi::format({}, {})", arg_code, self.position(span))
+                    }
                     "int" => format!("xpr_rt::bi::to_int({}, {})", arg_code, self.position(span)),
                     "real" => format!("xpr_rt::bi::to_real({}, {})", arg_code, self.position(span)),
                     "floor" => format!("xpr_rt::bi::floor({}, {})", arg_code, self.position(span)),
@@ -992,7 +1051,11 @@ impl<'a> Emitter<'a> {
         let mut out = String::new();
         out.push_str("{\n");
         for (name, rust) in &captures {
-            out.push_str(&format!("  let __cap_{} = {}.clone();\n", sanitize_ident(name), rust));
+            out.push_str(&format!(
+                "  let __cap_{} = {}.clone();\n",
+                sanitize_ident(name),
+                rust
+            ));
         }
 
         // O corpo é emitido em um escopo próprio, com os parâmetros e as capturas.
@@ -1023,7 +1086,10 @@ impl<'a> Emitter<'a> {
         body.push_str("{\n");
         self.emit_param_pattern(&mut body, &fn_def.param, "__arg", span)?;
         let body_code = self.emit_block(&fn_def.body)?;
-        body.push_str(&format!("  {}\n", body_code.trim_start_matches("{\n").trim_end_matches('}')));
+        body.push_str(&format!(
+            "  {}\n",
+            body_code.trim_start_matches("{\n").trim_end_matches('}')
+        ));
         body.push_str("}");
         self.scopes.pop();
 
@@ -1120,7 +1186,9 @@ fn visit_names(expr: &Expr, f: &mut impl FnMut(&str)) {
             visit_names(value, f);
         }
         Expr::FnDef(fn_def) => visit_block_names(&fn_def.body, f),
-        Expr::LogicalOr(operands) | Expr::LogicalAnd(operands) | Expr::BracketLiteral(operands, _) => {
+        Expr::LogicalOr(operands)
+        | Expr::LogicalAnd(operands)
+        | Expr::BracketLiteral(operands, _) => {
             for operand in operands {
                 visit_names(operand, f);
             }
@@ -1156,7 +1224,11 @@ fn visit_names(expr: &Expr, f: &mut impl FnMut(&str)) {
             visit_names(else_branch, f);
         }
         Expr::For {
-            init, cond, step, body, ..
+            init,
+            cond,
+            step,
+            body,
+            ..
         } => {
             visit_names(init, f);
             visit_names(cond, f);
@@ -1193,11 +1265,7 @@ fn free_names(block: &Block, params: &[String]) -> Vec<String> {
     free
 }
 
-fn collect_free_block(
-    block: &Block,
-    scopes: &mut Vec<HashSet<String>>,
-    free: &mut Vec<String>,
-) {
+fn collect_free_block(block: &Block, scopes: &mut Vec<HashSet<String>>, free: &mut Vec<String>) {
     scopes.push(HashSet::new());
     for stmt in &block.statements {
         if let Stmt::Expr(expr) = stmt {
@@ -1222,10 +1290,8 @@ fn collect_free_expr(expr: &Expr, scopes: &mut Vec<HashSet<String>>, free: &mut 
                 free.push(name.clone());
             }
         }
-        Expr::QualifiedName { .. }
-        | Expr::IntLit(..)
-        | Expr::RealLit(..)
-        | Expr::StringLit(..) => {}
+        Expr::QualifiedName { .. } | Expr::IntLit(..) | Expr::RealLit(..) | Expr::StringLit(..) => {
+        }
         Expr::Assignment { target, value, .. } => {
             collect_free_expr(value, scopes, free);
             collect_bind_pattern_free(target, scopes, free);
@@ -1236,7 +1302,9 @@ fn collect_free_expr(expr: &Expr, scopes: &mut Vec<HashSet<String>>, free: &mut 
             collect_free_block(&fn_def.body, scopes, free);
             scopes.pop();
         }
-        Expr::LogicalOr(operands) | Expr::LogicalAnd(operands) | Expr::BracketLiteral(operands, _) => {
+        Expr::LogicalOr(operands)
+        | Expr::LogicalAnd(operands)
+        | Expr::BracketLiteral(operands, _) => {
             for operand in operands {
                 collect_free_expr(operand, scopes, free);
             }
@@ -1272,7 +1340,11 @@ fn collect_free_expr(expr: &Expr, scopes: &mut Vec<HashSet<String>>, free: &mut 
             collect_free_expr(else_branch, scopes, free);
         }
         Expr::For {
-            init, cond, step, body, ..
+            init,
+            cond,
+            step,
+            body,
+            ..
         } => {
             scopes.push(HashSet::new());
             collect_free_expr(init, scopes, free);

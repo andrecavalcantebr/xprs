@@ -21,7 +21,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use xprc::codegen::{emit_program, ModuleUnit};
+use xprc::codegen::{ModuleUnit, emit_program};
 use xprc::diag::{Diagnostic, Severity};
 use xprc::lexer::{LexError, Lexer, Token, TokenKind};
 use xprc::parser::ast::Module as AstModule;
@@ -147,8 +147,9 @@ fn run(args: Vec<String>) -> Result<i32, String> {
 
     if options.mode == Mode::EmitRust {
         match &options.output {
-            Some(path) => fs::write(path, &rust)
-                .map_err(|e| format!("erro: não foi possível escrever {}: {}", path.display(), e))?,
+            Some(path) => fs::write(path, &rust).map_err(|e| {
+                format!("erro: não foi possível escrever {}: {}", path.display(), e)
+            })?,
             None => print!("{}", rust),
         }
         return Ok(0);
@@ -320,13 +321,8 @@ fn load_one(
         if options.verbose {
             eprintln!("xprc: import {:?} -> {}", import.name, resolved.display());
         }
-        let text = fs::read_to_string(&resolved).map_err(|e| {
-            format!(
-                "erro: não foi possível ler {}: {}",
-                resolved.display(),
-                e
-            )
-        })?;
+        let text = fs::read_to_string(&resolved)
+            .map_err(|e| format!("erro: não foi possível ler {}: {}", resolved.display(), e))?;
         let tokens = Lexer::new(&text).tokenize().map_err(|err: LexError| {
             format!(
                 "{}:{},{}: {}",
@@ -336,15 +332,17 @@ fn load_one(
                 lex_error_message(&err, &text)
             )
         })?;
-        let ast = Parser::new(&tokens).parse_module().map_err(|err: SyntaxError| {
-            format!(
-                "{}:{},{}: {}",
-                resolved.display(),
-                err.span.line_start,
-                err.span.col_start,
-                syntax_error_message(&err.kind, &err.detail)
-            )
-        })?;
+        let ast = Parser::new(&tokens)
+            .parse_module()
+            .map_err(|err: SyntaxError| {
+                format!(
+                    "{}:{},{}: {}",
+                    resolved.display(),
+                    err.span.line_start,
+                    err.span.col_start,
+                    syntax_error_message(&err.kind, &err.detail)
+                )
+            })?;
         load_one(&resolved, ast, options, units, loading)?;
     }
 
@@ -394,23 +392,7 @@ fn module_name(path: &Path) -> String {
 // Compilação do Rust gerado
 // ---------------------------------------------------------------------------------------------
 
-/// Localiza a crate `xpr_rt` (o diretório `xpr_rt/` deste projeto).
-fn runtime_dir() -> Result<PathBuf, String> {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("xpr_rt");
-    if manifest.join("Cargo.toml").is_file() {
-        return Ok(manifest);
-    }
-    Err(format!(
-        "erro: crate de runtime não encontrada em {}",
-        manifest.display()
-    ))
-}
-
 fn build(rust: &str, source: &Path, options: &Options) -> Result<i32, String> {
-    let runtime = runtime_dir()?;
-    let runtime_target = runtime.join("target").join("xprc-rt");
-    let runtime_rlib = ensure_runtime(&runtime, &runtime_target, options)?;
-
     let workdir = std::env::temp_dir().join(format!(
         "xprc-{}-{}",
         std::process::id(),
@@ -422,8 +404,13 @@ fn build(rust: &str, source: &Path, options: &Options) -> Result<i32, String> {
     fs::create_dir_all(&workdir)
         .map_err(|e| format!("erro: não foi possível criar {}: {}", workdir.display(), e))?;
     let generated = workdir.join("main.rs");
-    fs::write(&generated, rust)
-        .map_err(|e| format!("erro: não foi possível escrever {}: {}", generated.display(), e))?;
+    fs::write(&generated, rust).map_err(|e| {
+        format!(
+            "erro: não foi possível escrever {}: {}",
+            generated.display(),
+            e
+        )
+    })?;
 
     let output = match &options.output {
         Some(path) => path.clone(),
@@ -442,11 +429,7 @@ fn build(rust: &str, source: &Path, options: &Options) -> Result<i32, String> {
         .arg("--edition=2021")
         .arg("-o")
         .arg(&output)
-        .arg(format!("-Copt-level={}", options.opt_level))
-        .arg("--extern")
-        .arg(format!("xpr_rt={}", runtime_rlib.display()))
-        .arg("-L")
-        .arg(runtime_rlib.parent().unwrap_or(Path::new(".")));
+        .arg(format!("-Copt-level={}", options.opt_level));
 
     if options.verbose {
         eprintln!("xprc: executando {:?}", command);
@@ -460,100 +443,6 @@ fn build(rust: &str, source: &Path, options: &Options) -> Result<i32, String> {
         return Err("erro: a compilação do código Rust gerado falhou".to_string());
     }
     Ok(0)
-}
-
-/// Compila a crate `xpr_rt` uma vez (cacheada por um `target` dedicado) e devolve o `.rlib`.
-fn ensure_runtime(
-    runtime: &Path,
-    runtime_target: &Path,
-    options: &Options,
-) -> Result<PathBuf, String> {
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let mut command = Command::new(&cargo);
-    command
-        .arg("build")
-        .arg("--quiet")
-        .arg("--manifest-path")
-        .arg(runtime.join("Cargo.toml"))
-        .arg("--target-dir")
-        .arg(runtime_target);
-    if options.verbose {
-        eprintln!("xprc: executando {:?}", command);
-    }
-    let status = command
-        .status()
-        .map_err(|e| format!("erro: não foi possível executar cargo: {}", e))?;
-    if !status.success() {
-        return Err("erro: falha ao compilar a crate de runtime xpr_rt".to_string());
-    }
-    find_rlib(runtime_target)
-        .ok_or_else(|| "erro: libxpr_rt.rlib não encontrada após o build".to_string())
-}
-
-fn find_rlib(target: &Path) -> Option<PathBuf> {
-    // O layout do `cargo build` de uma crate-lib sem dependências variou entre versões:
-    //   - `debug/deps/libxpr_rt-<hash>.rlib`  (layout "com hash", usado por versões antigas)
-    //   - `debug/libxpr_rt.rlib`              (layout canônico, cargo ≥ 1.80)
-    //   - `debug/build/xpr_rt/<hash>/out/libxpr_rt-<hash>.rlib` (cópia do artefato)
-    // Procuramos em toda a subárvore de `debug/` para não depender do layout, preferindo o
-    // artefato canônico e, entre os demais, o mais recente.
-    let debug = target.join("debug");
-    let canonical = debug.join(format!("lib{}.rlib", RUNTIME_CRATE));
-    if canonical.is_file() {
-        return Some(canonical);
-    }
-    let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
-    collect_rlibs(&debug, 0, &mut best);
-    best.map(|(_, path)| path)
-}
-
-/// Nome da crate de runtime procurada por [`find_rlib`].
-const RUNTIME_CRATE: &str = "xpr_rt";
-
-/// Coleta `.rlib` da crate de runtime sob `dir`, descendo até `MAX_RLIB_DEPTH` níveis (evita
-/// varrer `incremental/`, que pode ser grande, e protege contra links simbólicos).
-fn collect_rlibs(
-    dir: &Path,
-    depth: usize,
-    best: &mut Option<(std::time::SystemTime, PathBuf)>,
-) {
-    const MAX_RLIB_DEPTH: usize = 5;
-    if depth > MAX_RLIB_DEPTH {
-        return;
-    }
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let file_type = match entry.file_type() {
-            Ok(file_type) => file_type,
-            Err(_) => continue,
-        };
-        if file_type.is_dir() {
-            collect_rlibs(&path, depth + 1, best);
-            continue;
-        }
-        let name = match path.file_name() {
-            Some(name) => name.to_string_lossy().to_string(),
-            None => continue,
-        };
-        if !name.starts_with(&format!("lib{}-", RUNTIME_CRATE)) || !name.ends_with(".rlib") {
-            continue;
-        }
-        let modified = match entry.metadata().and_then(|meta| meta.modified()) {
-            Ok(modified) => modified,
-            Err(_) => continue,
-        };
-        if best
-            .as_ref()
-            .map(|(current, _)| modified > *current)
-            .unwrap_or(true)
-        {
-            *best = Some((modified, path));
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -648,7 +537,11 @@ fn lex_error_message(err: &LexError, _source: &str) -> String {
 }
 
 fn syntax_error_message(kind: &xprc::parser::SyntaxErrorKind, detail: &str) -> String {
-    Diagnostic::new(xprc::diag::DiagCode::SyntaxError, format!("{}: {}", kind.name(), detail)).render()
+    Diagnostic::new(
+        xprc::diag::DiagCode::SyntaxError,
+        format!("{}: {}", kind.name(), detail),
+    )
+    .render()
 }
 
 fn dump_types(modules: &[ModuleUnit]) -> String {
@@ -666,75 +559,4 @@ fn dump_types(modules: &[ModuleUnit]) -> String {
         }
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::find_rlib;
-
-    /// Cria um diretório temporário isolado por nome de teste.
-    fn temp_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "xprc-find-rlib-{}-{}-{}",
-            std::process::id(),
-            name,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        std::fs::create_dir_all(&dir).expect("criar diretório temporário");
-        dir
-    }
-
-    #[test]
-    fn find_rlib_aceita_o_layout_canonico() {
-        // cargo ≥ 1.80: `debug/libxpr_rt.rlib`, sem `deps/`. Era o caso que quebrava com a
-        // atualização do toolchain (o código antigo só olhava `debug/deps`).
-        let target = temp_dir("canonico");
-        let debug = target.join("debug");
-        std::fs::create_dir_all(&debug).unwrap();
-        std::fs::write(debug.join("libxpr_rt.rlib"), b"rlib").unwrap();
-
-        let found = find_rlib(&target).expect("deveria achar o .rlib canônico");
-        assert_eq!(found, debug.join("libxpr_rt.rlib"));
-        let _ = std::fs::remove_dir_all(&target);
-    }
-
-    #[test]
-    fn find_rlib_aceita_o_layout_com_hash_em_deps() {
-        // Layout antigo: `debug/deps/libxpr_rt-<hash>.rlib`. Precisa continuar funcionando.
-        let target = temp_dir("deps");
-        let deps = target.join("debug").join("deps");
-        std::fs::create_dir_all(&deps).unwrap();
-        std::fs::write(deps.join("libxpr_rt-0123456789abcdef.rlib"), b"rlib").unwrap();
-
-        let found = find_rlib(&target).expect("deveria achar o .rlib em deps/");
-        assert!(found.ends_with("libxpr_rt-0123456789abcdef.rlib"));
-        let _ = std::fs::remove_dir_all(&target);
-    }
-
-    #[test]
-    fn find_rlib_prefere_o_canonico_ao_hash() {
-        let target = temp_dir("prefere");
-        let debug = target.join("debug");
-        let deps = debug.join("deps");
-        std::fs::create_dir_all(&deps).unwrap();
-        std::fs::write(debug.join("libxpr_rt.rlib"), b"canonico").unwrap();
-        std::fs::write(deps.join("libxpr_rt-aaa.rlib"), b"hash").unwrap();
-
-        assert_eq!(find_rlib(&target).unwrap(), debug.join("libxpr_rt.rlib"));
-        let _ = std::fs::remove_dir_all(&target);
-    }
-
-    #[test]
-    fn find_rlib_ignora_crates_com_nome_parecido() {
-        let target = temp_dir("parecido");
-        let debug = target.join("debug");
-        std::fs::create_dir_all(&debug).unwrap();
-        std::fs::write(debug.join("libxpr_rt_extra-abc.rlib"), b"x").unwrap();
-
-        assert!(find_rlib(&target).is_none(), "não pode casar crate de nome parecido");
-        let _ = std::fs::remove_dir_all(&target);
-    }
 }

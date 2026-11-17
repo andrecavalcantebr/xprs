@@ -221,11 +221,7 @@ pub fn not_callable(value: &Value, position: Pos) -> Fail {
 }
 
 pub fn call_depth_exceeded(position: Pos) -> Fail {
-    Fail::new(
-        DiagCode::CallDepthExceeded,
-        "10000",
-        position,
-    )
+    Fail::new(DiagCode::CallDepthExceeded, "10000", position)
 }
 
 /// Falha de `fail(mensagem)` — o texto é do usuário (Seção 4.9).
@@ -245,6 +241,7 @@ thread_local! {
 }
 
 /// Chama um valor de função com um argumento, respeitando o limite de profundidade.
+#[inline]
 pub fn call(value: Value, arg: Value, position: Pos) -> XprResult {
     let f = match value {
         Value::Fn(f) => f,
@@ -361,6 +358,7 @@ pub fn codepoints(text: &str) -> i64 {
 
 /// Extrai um `bool`, falhando com `type-mismatch` se o valor não for bool (Seção 4.3/4.4:
 /// nenhuma conversão implícita).
+#[inline]
 pub fn as_bool(value: &Value, position: Pos) -> Result<bool, Fail> {
     match value {
         Value::Bool(b) => Ok(*b),
@@ -501,10 +499,16 @@ pub fn force(result: XprResult) -> Value {
 
 #[cfg(test)]
 mod format_tests {
-    use super::{format_real, Format};
+    use super::{Format, format_real};
 
     fn f(x: f64, decimals: i64, significant: i64) -> String {
-        format_real(x, Format { decimals, significant })
+        format_real(
+            x,
+            Format {
+                decimals,
+                significant,
+            },
+        )
     }
 
     #[test]

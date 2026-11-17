@@ -19,6 +19,7 @@ use crate::{
 // Aritmética
 // ---------------------------------------------------------------------------------------------
 
+#[inline]
 pub fn add(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     numeric(
         lhs,
@@ -35,6 +36,7 @@ pub fn add(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     )
 }
 
+#[inline]
 pub fn sub(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     numeric(
         lhs,
@@ -46,6 +48,7 @@ pub fn sub(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     )
 }
 
+#[inline]
 pub fn mul(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     numeric(
         lhs,
@@ -57,6 +60,7 @@ pub fn mul(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     )
 }
 
+#[inline]
 pub fn div(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     match (&lhs, &rhs) {
         (Value::Int(_), Value::Int(0)) => Err(div_by_zero(pos)),
@@ -72,6 +76,7 @@ pub fn div(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     }
 }
 
+#[inline]
 pub fn rem(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     match (&lhs, &rhs) {
         (Value::Int(_), Value::Int(0)) => Err(div_by_zero(pos)),
@@ -136,18 +141,22 @@ fn numeric(
 // Comparações
 // ---------------------------------------------------------------------------------------------
 
+#[inline]
 pub fn lt(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     compare(lhs, rhs, pos, |ord| ord == std::cmp::Ordering::Less)
 }
 
+#[inline]
 pub fn le(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     compare(lhs, rhs, pos, |ord| ord != std::cmp::Ordering::Greater)
 }
 
+#[inline]
 pub fn gt(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     compare(lhs, rhs, pos, |ord| ord == std::cmp::Ordering::Greater)
 }
 
+#[inline]
 pub fn ge(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     compare(lhs, rhs, pos, |ord| ord != std::cmp::Ordering::Less)
 }
@@ -198,10 +207,12 @@ fn real_lt(a: f64, b: f64, accept: fn(std::cmp::Ordering) -> bool) -> bool {
 }
 
 /// Igualdade estrutural (`==`), com promoção int→real.
+#[inline]
 pub fn eq(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     equal(lhs, rhs, pos, true)
 }
 
+#[inline]
 pub fn ne(lhs: Value, rhs: Value, pos: Pos) -> crate::XprResult {
     equal(lhs, rhs, pos, false)
 }
@@ -239,6 +250,7 @@ fn equal(lhs: Value, rhs: Value, pos: Pos, want_equal: bool) -> crate::XprResult
 // ---------------------------------------------------------------------------------------------
 
 /// `not` — apenas bool.
+#[inline]
 pub fn not(value: Value, pos: Pos) -> crate::XprResult {
     match value {
         Value::Bool(b) => Ok(Value::Bool(!b)),
@@ -250,6 +262,7 @@ pub fn not(value: Value, pos: Pos) -> crate::XprResult {
 }
 
 /// Sinal unário `-`: números, com promoção e elemento a elemento em listas/tuplas numéricas.
+#[inline]
 pub fn neg(value: Value, pos: Pos) -> crate::XprResult {
     match value {
         Value::Int(n) => n
@@ -275,6 +288,7 @@ pub fn neg(value: Value, pos: Pos) -> crate::XprResult {
 }
 
 /// Sinal unário `+`: valida que é numérico, sem alterar o valor.
+#[inline]
 pub fn plus(value: Value, pos: Pos) -> crate::XprResult {
     match value {
         Value::Int(_) | Value::Real(_) => Ok(value),
@@ -300,6 +314,7 @@ pub fn plus(value: Value, pos: Pos) -> crate::XprResult {
 // ---------------------------------------------------------------------------------------------
 
 /// `valor[indice]` com índice int. Strings retornam uma string de um codepoint.
+#[inline]
 pub fn index(value: Value, index_value: Value, pos: Pos) -> crate::XprResult {
     let index = match index_value {
         Value::Int(n) => n,
