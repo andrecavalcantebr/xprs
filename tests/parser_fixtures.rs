@@ -1,11 +1,11 @@
-//! Suíte golden-file do Parser (ver `plano-parser.md`, seção "Fixtures golden-file").
+//! Suíte golden-file do Parser (ver `MEMORY.md`, seção "Contratos de testes e fixtures").
 //!
 //! Itera `tests/parser/cases/*.x` (sucesso, par com `.ast`) e
 //! `tests/parser/cases/errors/*.x` (erro, par com `.error`), tokeniza com o lexer real, parseia e
 //! compara o dump da AST com o arquivo-irmão esperado. Imprime `[OK]`/`[FAIL]` por fixture e entra
 //! em panic com um resumo no fim se qualquer fixture falhar.
 //!
-//! Formatos normativos (plano-parser.md):
+//! Formatos normativos (MEMORY.md):
 //!   `.ast`   — árvore em texto, 2 espaços por nível, um nó por linha, sem spans
 //!   `.error` — `{posição} {VarianteDeSyntaxErrorKind}`
 

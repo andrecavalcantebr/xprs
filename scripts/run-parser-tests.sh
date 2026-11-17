@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Roda a etapa Parser completa e dá o veredito OK/NOK:
-#   1. testes unitários por subetapa (tests/parser_tests.rs, subetapas A-J de plano-parser.md);
+#   1. testes unitários por subetapa (tests/parser_tests.rs, grupos históricos A-J);
 #   2. suíte golden-file (tests/parser_fixtures.rs sobre tests/parser/cases/).
 # Única dependência: o toolchain Rust (cargo/rustc) que o projeto já exige para tudo o mais.
 #

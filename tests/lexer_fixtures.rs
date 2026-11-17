@@ -1,11 +1,11 @@
-//! Suíte golden-file do Lexer (ver `plano-lexer.md`, seção "Fixtures golden-file").
+//! Suíte golden-file do Lexer (ver `MEMORY.md`, seção "Contratos de testes e fixtures").
 //!
 //! Itera `tests/lexer/cases/*.x` (sucesso, par com `.tokens`) e
 //! `tests/lexer/cases/errors/*.x` (erro, par com `.error`), tokeniza cada fonte e compara o
 //! dump formatado com o arquivo-irmão esperado. Imprime `[OK]`/`[FAIL]` por fixture (visível com
 //! `--nocapture`) e entra em panic com um resumo no fim se qualquer fixture falhar.
 //!
-//! O formato é normativo (plano-lexer.md):
+//! O formato é normativo (MEMORY.md):
 //!   `{posição} {representação-do-TokenKind}[ adj]`
 //! e o formato de erro:
 //!   `{posição} {VarianteDeLexErrorKind}`

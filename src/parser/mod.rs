@@ -1,4 +1,4 @@
-//! Parser descendente recursivo da linguagem XPR (ver `plano-parser.md`).
+//! Parser descendente recursivo da linguagem XPR (ver `MEMORY.md`).
 //!
 //! Aplica **apenas** regras estruturais e de precedência — nada de tipos, resolução de nomes ou
 //! distinção lista/tupla. As restrições puramente sintáticas da gramática que ele **deve**

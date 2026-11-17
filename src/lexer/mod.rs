@@ -1,4 +1,4 @@
-//! Analisador léxico da linguagem XPR (ver `plano-lexer.md` e `xpr-specs.md`, Seção 3).
+//! Analisador léxico da linguagem XPR (ver `MEMORY.md` e `xpr-specs.md`, Seção 3).
 //!
 //! Responsabilidades (e apenas elas):
 //! * transformar o texto-fonte UTF-8 em uma sequência de [`Token`] com [`Span`] em

@@ -1,4 +1,4 @@
-//! Testes unitários do Parser, organizados pelas subetapas A–J de `plano-parser.md`.
+//! Testes unitários do Parser, organizados pelos grupos históricos A–J.
 //!
 //! A suíte golden-file equivalente (fixtures de `tests/parser/cases/`) vive em
 //! `tests/parser_fixtures.rs`; estas duas suítes juntas fecham a etapa.

@@ -1,4 +1,4 @@
-//! Testes unitários do Lexer, organizados por subetapa de `plano-lexer.md`.
+//! Testes unitários do Lexer, organizados pelos grupos históricos 1–7.
 //!
 //! Ordem das subetapas (cada seção testa só o que já existe até ela):
 //! 1. Núcleo (avanço por codepoint, linha/coluna, EOF, espaços em branco, comentários)

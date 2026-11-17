@@ -1,4 +1,4 @@
-//! Emissão de código Rust a partir da AST (subetapas A, C, D e G de `plano-codegen.md`).
+//! Emissão de código Rust a partir da AST (arquitetura em `MEMORY.md`).
 //!
 //! ## Modelo de execução
 //!

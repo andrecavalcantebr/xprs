@@ -1,4 +1,4 @@
-//! AST de um módulo XPR (ver `plano-parser.md`, seção "Estruturas de dados").
+//! AST de um módulo XPR (ver `MEMORY.md`, seção "Decisões de arquitetura").
 //!
 //! O parser produz **apenas** a estrutura sintática: nada de tipos, resolução de nomes ou
 //! distinção lista/tupla (essa distinção depende de unificação de tipos e pertence ao
@@ -51,7 +51,7 @@ pub struct Definition {
 pub enum Initializer {
     FnDef(FnDef),
     /// Já validado sintaticamente: não contém `fn_call`, `block`, `iif`, `for`, atribuição nem
-    /// `fn_def` (subetapa I de `plano-parser.md`).
+    /// `fn_def` (Seção 3 de `xpr-specs.md`).
     ConstExpr(Expr),
 }
 

@@ -1,4 +1,4 @@
-//! Biblioteca de runtime da linguagem XPR (ver `plano-codegen.md`, subetapa F).
+//! Biblioteca de runtime da linguagem XPR (ver `MEMORY.md`, decisões de arquitetura).
 //!
 //! Todo programa compilado por `xprc` depende desta crate. Ela concentra:
 //!

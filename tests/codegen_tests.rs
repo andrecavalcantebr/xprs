@@ -1,4 +1,4 @@
-//! Testes da etapa Codegen (subetapas A–G de `plano-codegen.md`).
+//! Testes do Codegen (arquitetura e contratos em `MEMORY.md`).
 //!
 //! Diferente das etapas Lexer/Parser, aqui o oráculo não é um dump interno e sim **comportamento
 //! observável de ponta a ponta**: compilar um `.x` com `xprc`, rodar o executável gerado e

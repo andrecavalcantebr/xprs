@@ -1,4 +1,4 @@
-//! Dump textual da AST, no formato normativo de `plano-parser.md`
+//! Dump textual da AST, no formato normativo de `MEMORY.md`
 //! (seção "Formato do dump de AST").
 //!
 //! Regras:

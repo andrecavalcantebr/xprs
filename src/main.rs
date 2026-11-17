@@ -1,5 +1,4 @@
-//! Driver da linha de comando `xprc` (ver `xpr-specs.md`, Seção 8, e `plano-codegen.md`,
-//! subetapa G).
+//! Driver da linha de comando `xprc` (ver `xpr-specs.md`, Seção 8, e `MEMORY.md`).
 //!
 //! Modos suportados:
 //!

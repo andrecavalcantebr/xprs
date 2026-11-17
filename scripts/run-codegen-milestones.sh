@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Roda os milestones de ponta a ponta do Codegen (tests/codegen/milestones/MNN_nome/) contra o
 # binário xprc real: compila cada milestone, executa o binário gerado, e compara
-# stdout/exit/stderr com o esperado. Ver plano-testes-codegen.md para o formato de cada
+# stdout/exit/stderr com o esperado. Ver MEMORY.md para o formato de cada
 # milestone e a regra de que a suíte só cresce (nunca remove um milestone antigo).
 #
 # Única dependência: o toolchain Rust do projeto (cargo/rustc) + utilitários POSIX padrão

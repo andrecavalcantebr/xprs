@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Roda a etapa Lexer completa e dá o veredito OK/NOK:
-#   1. testes unitários por subetapa (tests/lexer_tests.rs, subetapas 1-7 de plano-lexer.md);
+#   1. testes unitários por subetapa (tests/lexer_tests.rs, grupos históricos 1-7);
 #   2. suíte golden-file (tests/lexer_fixtures.rs sobre tests/lexer/cases/).
 # Única dependência: o toolchain Rust (cargo/rustc) que o projeto já exige para tudo o mais.
 #

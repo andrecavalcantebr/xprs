@@ -1,4 +1,4 @@
-//! Inferência e checagem estática de tipos (subetapa C de `plano-codegen.md`; `xpr-specs.md`,
+//! Inferência e checagem estática de tipos (decisões em `MEMORY.md`; `xpr-specs.md`,
 //! Seções 2, 4.7, 4.10 e 5.2).
 //!
 //! O programa é **inteiramente** verificado antes de qualquer geração de código (Seção 1), e um

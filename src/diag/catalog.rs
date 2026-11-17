@@ -1,5 +1,5 @@
 //! Catálogo de diagnósticos — **fonte autoritativa única** (ver `xpr-specs.md`, Seção 7, e
-//! `plano-codegen.md`, subetapa E).
+//! `MEMORY.md`, decisões de arquitetura).
 //!
 //! Este arquivo é compilado **duas vezes**, como o mesmo código-fonte Rust:
 //! * no compilador (`xprc`), via `src/diag/mod.rs`;
