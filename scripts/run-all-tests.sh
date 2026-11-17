@@ -13,8 +13,8 @@ if [ "$status" -eq 0 ]; then
 fi
 
 if [ "$status" -eq 0 ]; then
-  # Testes Rust da crate (unitários da lib + integração), que antes ficavam fora do gate.
-  cargo test --quiet || status=1
+  # Testes Rust do workspace, incluindo runtime, biblioteca, CLI e integração.
+  cargo test --workspace --quiet || status=1
 fi
 
 if [ "$status" -eq 0 ]; then

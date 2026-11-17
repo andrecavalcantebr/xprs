@@ -30,14 +30,14 @@ número de iterações concluídas.
 
 ## 2. Arquitetura do compilador
 
-`xprc` é um transpilador: traduz XPR para **Rust** e compila com `rustc`, vinculando a crate de
-runtime `xpr_rt`. Não há bytecode nem VM.
+`xprc` é um transpilador: traduz XPR para **Rust** e compila com `rustc`, embutindo os fontes do
+runtime `xpr_rt` no Rust emitido. Não há dependência de `.rlib` externo. Não há bytecode nem VM.
 
 ```
 arquivo.x ──► Lexer ──► Parser ──► TypeChecker ──► Emitter ──► rustc ──► executável
                 │         │            │              │           │
-             Vec<Token>  Module     tipos por nó   main.rs +   liga xpr_rt
-                │         (AST)      (Ty)          mods por        (.rlib)
+             Vec<Token>  Module     tipos por nó   main.rs +   runtime
+                │         (AST)      (Ty)          mods por       embutido
                 └─ Span em codepoints ─┘           módulo XPR
 ```
 
@@ -115,7 +115,7 @@ Crate separada (membro do workspace), compilada uma vez e vinculada a todo progr
 * `bi`: os 22 builtins da Seção 5 (`print`, `println`, `len`, `input`, `fail`, `string`, `format`,
   `int`, `real`, `floor`, `ceil`, `round`, `frac`, `any`, `all`, `cat`, `at`, `fill`, `range`,
   `set`, `slice`, `apply`), selecionados por tipo na emissão e disponíveis como valores.
-* Formatação numérica da Seção 5.1: `decimais = 2`, `alg_significativos = 15`, notação científica
+* Formatação numérica da Seção 5.1: `decimais = 2`, `alg_significativos = 5`, notação científica
   fora da faixa, `NaN`/`INF`/`-INF` literais.
 * `run_main_with`: executa o programa em uma thread com pilha de 512 MB, para que o limite de
   10.000 chamadas da linguagem seja alcançado e vire `call-depth-exceeded` capturável — com a

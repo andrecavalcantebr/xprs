@@ -835,7 +835,7 @@ Cada builtin recebe um argumento e retorna um resultado (veja 4.10). `α` e `β`
 
 ### 5.1 Formatação de números
 
-Não há uma configuração global de formatação. `print`, `println` e `string` convertem **reals** para texto com um formato padrão fixo, `decimais = 2` e `alg_significativos = 15`; ints são sempre impressos como dígitos decimais. Para escolher outro formato, converta explicitamente:
+Não há uma configuração global de formatação. `print`, `println` e `string` convertem **reals** para texto com um formato padrão fixo, `decimais = 2` e `alg_significativos = 5`; ints são sempre impressos como dígitos decimais. Para escolher outro formato, converta explicitamente:
 
 ```c
 format([x, [4, 15]])     // x com 4 casas decimais e 15 dígitos significativos: uma string
@@ -850,7 +850,7 @@ O formato `[decimais, alg_significativos]` funciona da seguinte maneira:
 
 * Se $10^{-\text{decimais}} \le |x| < 10^{\text{alg\_significativos}}$: notação fixa com `decimais` dígitos após o ponto — o real `20.0` é impresso como `20.00`.
 
-* Caso contrário: notação científica com `alg_significativos` dígitos significativos — `0.001` é impresso como `1.00e-3`; `1234567890123456789.0` como `1.23456789012346e+18`.
+* Caso contrário: notação científica com `alg_significativos` dígitos significativos — no formato padrão `[2, 5]`, `0.001` é impresso como `1.0000e-3` e `1234567890123456789.0` como `1.2346e+18`. Com formato explícito `[2, 15]`, este último é impresso como `1.23456789012346e+18`.
 
 * O arredondamento segue a convenção round-half-to-even (arredonda o meio para o par mais
   próximo), o mesmo comportamento do `printf` de C.

@@ -14,8 +14,8 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
 * **Fase 2 — Lexer: CONCLUÍDA.** 52 testes unitários + 12 fixtures golden-file.
 * **Fase 2 — Parser: CONCLUÍDA.** 80 testes unitários (subetapas A–J) + 16 fixtures.
 * **Fase 2 — Codegen: CONCLUÍDA.** Pipeline `lex → parse → tipos → Rust → rustc → execução`
-  fechado. 20 testes unitários (catálogo + checagem de tipos), 38 de integração (emissão,
-  semântica, CLI) e 14 milestones de ponta a ponta.
+  fechado. 56 testes da lib (catálogo + tipos), 53 de integração, 22 do runtime e
+  16 milestones de ponta a ponta; CLI sem testes unitários após eliminar a procura de `.rlib`.
 * **Gate global: `./scripts/run-all-tests.sh` → `TUDO OK` (exit 0).**
 * **`RELATORIO_FINAL.md`: GERADO** (AGENTS.md [3]) — arquitetura da linguagem, estrutura do
   compilador, estratégia de testes, lições aprendidas e status final.
@@ -24,12 +24,17 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
   `[β]`; antes `apply` devolvia `Any`, o que deixava `apply([["a"], fn(x){ x+1; }])` passar sem
   erro. `apply([[], f])` → `[]` para qualquer `f`, sem instanciar (`[]` é absorvente). Spec (Seção
   5) reescrita nos dois pontos e milestone `M15_apply_instancia` adicionado (16/16 milestones).
-* **Bug aberto (descoberto por teste de controle, NÃO corrigido): `+` recursivo com folhas
-  string.** `["a"] + ["b"]` e `[1, "a"] + [2, "b"]` dão `type-mismatch`, mas a spec (Seção 4.8,
-  linha ~881/883) manda "folhas string concatenam" e usa `[1, "a"] + [2, "b"] → [3, "ab"]` como
-  exemplo literal. Causa: em `BinOp::Add` o teste `matches!(left, Ty::Str)` é feito antes de
-  recursar em `List`/`Tuple`, então `List(Str)` cai em `numeric_binary`, onde `is_numeric()` falha.
-  `[1] + [2]` funciona; só folhas string quebram. Pré-existente, sem relação com o `apply`.
+* **`+` recursivo com folhas string: CORRIGIDO** no commit `1f5e557`, com testes
+  para listas, tuplas e estruturas aninhadas (Seção 4.8).
+* **Runtime embutido** desde `0db9582`: os fontes de `xpr_rt` e o catálogo são incluídos
+  no Rust emitido. O executável `xprc` precisa apenas de `rustc` para compilar programas XPR;
+  não procura nem vincula `.rlib` externo e não mantém cache separado do runtime.
+* **Cache de genéricos corrigido nesta revisão**: conserva o tipo do resultado de instâncias
+  concluídas; apenas reentradas ainda em andamento retornam `Any`. Chave estrutural por tipo,
+  nome e posição da definição. Testes de regressão para chamada repetida direta e via `apply`.
+* **Formatação decidida pelo usuário**: padrão `[2, 5]` (duas casas na notação fixa,
+  cinco dígitos significativos na científica). `0.001` → `1.0000e-3`; formatos explícitos
+  preservam a precisão solicitada. Teste de integração e exemplo da spec alinhados à decisão.
 * **Edition 2024** nos dois manifests (`Cargo.toml` e `xpr_rt/Cargo.toml`), após a fixação da
   toolchain. Nenhuma linha de código precisou mudar: não há `gen` como identificador, `static
   mut` nem `unsafe` no projeto (verificado antes da migração). Gate `TUDO OK` igual ao da 2021.
@@ -41,22 +46,18 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
   `apt remove --purge rustc cargo` + purge dos órfãos `libstd-rust*`). Sem duplicata: `type -a
   rustc cargo` → só `~/.cargo/bin/*`. `edition` era 2021 na troca e passou a 2024 na etapa
   seguinte (ver bullet acima).
-  **Bug de portabilidade corrigido**: `find_rlib` só procurava `debug/deps/libxpr_rt-<hash>.rlib`
-  e no cargo ≥ 1.80 o artefato canônico é `debug/libxpr_rt.rlib` (sem `deps/`), então o runtime
-  "não era encontrado" (16 e2e falhavam). Agora aceita os dois layouts, prefere o canônico e
-  varre a subárvore com limite de profundidade; 4 unitários novos cobrem os layouts.
-  Nota operacional: `cargo clean` na raiz **não** limpa `xpr_rt/target/xprc-rt` (cache do
-  runtime) — ao trocar de toolchain, remova esse diretório também, senão o `.rlib` antigo gera
-  `E0786: invalid metadata`.
+  A antiga procura de `.rlib` e o cache `xpr_rt/target/xprc-rt` foram eliminados pelo runtime
+  embutido; não são requisitos operacionais da versão atual.
 * **Pós-Codegen: limitação "especialização de genéricos" FECHADA** (Seção 4.10): `fn(x){ x + 1; }`
   chamada com string agora é `type-mismatch` — o corpo é re-verificado por instância
   (`instantiate`, com o parâmetro ligado ao tipo concreto do argumento) e o **resultado** da
-  chamada é o da instância (`f(3)` tem tipo int, não `Any`). Instâncias memoizadas por
-  `(nome, tipo)` **antes** de re-checar, senão a recursiva se instancia sem fim. Backend é
+  chamada é o da instância (`f(3)` tem tipo int, não `Any`). Instâncias marcadas no cache
+  antes de re-checar (estado em andamento), senão a recursiva se instancia sem fim;
+  o tipo de resultado concreto fica no cache ao concluir. Backend é
   dinâmico, então não há código por instância — a entrega é de verificação.
 * **Corrigido o gate**: `run-all-tests.sh` não rodava `cargo test` (só lexer/parser/milestones),
   e foi por isso que uma regressão minha na subetapa de privacidade (`check_module` filtrando
-  `_main`, quebrando 8 unitários) passou. O gate agora roda `cargo test` e o filtro de privados
+  `_main`, quebrando 8 unitários) passou. O gate agora roda `cargo test --workspace` e o filtro de privados
   foi movido para a fronteira de import (`TypeChecker::exported_members`).
 * **Pós-Codegen: limitação "nomes privados" FECHADA** (Seção 4.1): nome iniciado por `_` é
   privado ao módulo — `alias._nome` de fora é `undefined-identifier` (checado em `check_name` e,
@@ -85,8 +86,8 @@ ser atualizado — não só expandido — cada vez que esse estado muda.
   resultado de uma função recursiva é determinado pelas ramificações que não chamam a própria
   função"): `f = fn(x){ f(x); };` e `iif(c, f(x), f(x))` são rejeitados em compilação;
   `x * fat(x-1)` e builtins genéricos (`fill`, …) NÃO disparam (análise sintática conservadora
-  via `result_calls_self`). Os casos de genéricos — uso como valor sem contexto (linha 725) e
-  `apply` com `[]` (linha 816) — seguem abertos, acoplados à especialização (limitação 2).
+  via `result_calls_self`). O caso de genéricos como valor sem contexto segue aberto. `apply` com `[]` foi
+  resolvido posteriormente pela decisão de lista vazia absorvente.
   Incidente 3.3.1: M10 usava recursão pura (`rec = fn(n){ rec(n+1); };`) para o teste de
   profundidade; ajustado para `iif(n < 0, 0, rec(n + 1))` (válido pela 4.10, mesma saída).
 * **Pós-Codegen: limitação `assign-to-constant` FECHADA** (Seção 6). Constantes predefinidas
@@ -116,7 +117,7 @@ xpr_rt/               crate de runtime: lib.rs (Value/Fail/Format/recursive_clos
                       run_main_with/finish), ops.rs (Seção 5.2), bi.rs (builtins da Seção 5)
 tests/lexer/          cases/ (12 fixtures) + fixtures.rs + lexer_tests.rs (52)
 tests/parser/         cases/ (16 fixtures) + fixtures.rs + parser_tests.rs (80)
-tests/codegen/        milestones/ (14) + codegen_tests.rs (38)
+tests/codegen/        milestones/ (16); tests/codegen_tests.rs (53)
 scripts/              run-lexer-tests.sh, run-parser-tests.sh, run-codegen-milestones.sh,
                       run-all-tests.sh
 ```
@@ -127,7 +128,7 @@ Documentos: `xpr-specs.md` (especificação canônica), `plano-lexer.md` e `plan
 
 ## Decisões de arquitetura já tomadas (não reabrir sem motivo novo)
 
-* `xprc` traduz XPR para **Rust** e compila com `rustc`, vinculando `libxpr_rt.rlib`. Nunca C,
+* `xprc` traduz XPR para **Rust** e compila com `rustc`, com os fontes do runtime embutidos no Rust emitido. Nunca C,
   nunca bytecode/VM.
 * **Catálogo único**: `src/diag/catalog.rs` é compilado pelo compilador **e** pela crate de
   runtime via `#[path = "../../src/diag/catalog.rs"]`. Nada é gerado de um lado para o outro.
@@ -157,7 +158,8 @@ Documentos: `xpr-specs.md` (especificação canônica), `plano-lexer.md` e `plan
   exige 1.85+, e o código gerado pelo `xprc` continua em `--edition=2021`).
 * **Especialização de genéricos** (Seção 4.10): `instantiate(nome, tipo_do_argumento)` recheca o
   corpo com o parâmetro no tipo concreto e devolve o tipo de resultado da instância; memoização
-  `(nome, tipo)` **antes** do re-cheque (guarda de reentrância para recursivas).
+  por nome, posição da definição e tipo estrutural, com guarda de reentrância para recursivas
+  e tipo de resultado armazenado ao concluir.
 * **Privacidade na fronteira de import**: `check_module` devolve todos os nomes (o oráculo dos
   testes unitários depende de `_main`); quem esconde os privados é `exported_members`.
 * **Nomes privados** (Seção 4.1): `_` inicial = privado ao módulo; a checagem é no
@@ -186,12 +188,9 @@ em vez de simplesmente revertê-la.
 
 Detalhes em `RELATORIO_PROGRESSO.md`, seção "Etapa 3 — Codegen":
 
-1. `cannot-infer` no caso "uso como valor sem contexto determinar A" (linha 725) e "`apply`
-   com `[]` literal" (linha 816): a instanciação cobre chamadas diretas, não o uso do nome como
-   valor sem contexto concreto.
-2. Formatação científica: `significant < 15` → `significant - 1` casas; padrão 15 → 2 casas
-   (o exemplo `0.001 → 1.00e-3` da spec é batido; a regra geral da mantissa é ambígua na própria
-   spec — exige decisão antes de mexer).
+1. `cannot-infer` no caso "uso como valor sem contexto determinar A" (linha 725):
+   a instanciação cobre chamadas diretas. `apply` com `[]`
+   já foi resolvido pela decisão de lista vazia absorvente, sem instanciação.
 
 (Fechadas: `assign-to-constant`, `cannot-infer` de recursivas, índice de tupla constante, neutro
 do `try` por tipo, `_init`/ordem de inicialização, nomes privados e especialização de genéricos —
@@ -203,8 +202,7 @@ ver seções "Pós-Codegen" do RELATORIO_PROGRESSO.md. Pendência de decisão da
 O processo de `AGENTS.md` (Fases 1, 2 e 3) está **completo**. Para continuar evoluindo:
 
 1. Escolher **um** item das "Limitações conhecidas" acima (sugestão de ordem por valor/esforço:
-   formatação científica, ou fechar o restante de `cannot-infer` (uso como valor / `apply`
-   com `[]`, que já têm a instanciação pronta como base).
+   fechar o restante de `cannot-infer` no uso de função como valor sem contexto).
 2. Escrever **primeiro** o teste — milestone em `tests/codegen/milestones/` (a suíte só cresce) ou
    unitário em `src/codegen/types.rs`/`tests/codegen_tests.rs` — e confirmar que ele falha.
 3. Implementar até o gate voltar a `TUDO OK`, remover a linha correspondente da lista de

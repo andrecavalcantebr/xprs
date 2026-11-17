@@ -791,3 +791,87 @@ listas/tuplas. Fica como item aberto — não foi tocado para não misturar com 
 ./scripts/run-all-tests.sh  ->  TUDO OK
 52 lexer units + 50 lib + 4 bin + 53 integração + 16/16 milestones
 ```
+
+
+## Revisão — cache de genéricos, precisão padrão e continuidade
+
+### Atividades e decisões
+
+* Reproduzida a perda de tipo após a primeira chamada genérica. Dois testes novos, para
+  chamada direta e `apply`, falharam antes da implementação e passaram depois.
+* O cache armazena `None` durante a instanciação (guarda de recursão) e `Some(Ty)` ao concluir;
+  em erro remove a entrada. A chave usa tipo estrutural, nome e posição da definição para
+  evitar colisões de apresentação de tipos e entre definições distintas de mesmo nome.
+* Incidente 3.3.1: o teste de integração esperava `1.00e-3`, enquanto a regra de 15
+  significativos e os testes do runtime exigiam `1.00000000000000e-3`. O usuário foi consultado
+  e decidiu por 4 a 5 dígitos significativos para melhor visualização; adotados **5** no padrão.
+  O teste original foi atualizado somente após essa decisão. A spec acompanha a mudança.
+* Novo teste de formato padrão cobre fração pequena, arredondamento, limiar entre notações
+  e manutenção de duas casas na notação fixa; falhou antes de mudar o padrão de `(2,15)`
+  para `(2,5)`. Formatos explícitos mantêm a precisão solicitada.
+* O gate usa `cargo test --workspace --quiet`, incluindo agora os testes do runtime.
+* Estado e relatório final atualizados: soma recursiva com strings já corrigida em `1f5e557`;
+  runtime embutido desde `0db9582`, sem linkagem externa ou cache de `.rlib`.
+
+### Resultado final dos testes
+
+Saída do `cargo test --workspace --quiet` executado pelo gate:
+
+```text
+running 22 tests
+......................
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 56 tests
+........................................................
+test result: ok. 56 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 53 tests
+.....................................................
+test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.49s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 52 tests
+....................................................
+test result: ok. 52 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 1 test
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 80 tests
+................................................................................
+test result: ok. 80 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+Fechamento do gate `./scripts/run-all-tests.sh` (exit 0):
+
+```text
+16 passaram, 0 falharam.
+====================
+TUDO OK
+```

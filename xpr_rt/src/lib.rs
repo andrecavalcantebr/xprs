@@ -265,7 +265,7 @@ pub fn call(value: Value, arg: Value, position: Pos) -> XprResult {
 // Conversão para texto (Seções 5 e 5.1)
 // ---------------------------------------------------------------------------------------------
 
-/// Formato numérico: `decimais`, `alg_significativos` (Seção 5.1). O padrão é `(2, 15)`.
+/// Formato numérico: `decimais`, `alg_significativos` (Seção 5.1). O padrão é `(2, 5)`.
 #[derive(Debug, Clone, Copy)]
 pub struct Format {
     pub decimals: i64,
@@ -276,7 +276,7 @@ impl Default for Format {
     fn default() -> Self {
         Format {
             decimals: 2,
-            significant: 15,
+            significant: 5,
         }
     }
 }
@@ -509,6 +509,16 @@ mod format_tests {
                 significant,
             },
         )
+    }
+
+    #[test]
+    fn padrao_usa_cinco_significativos_na_cientifica() {
+        let default = Format::default();
+        assert_eq!(format_real(0.001, default), "1.0000e-3");
+        assert_eq!(format_real(123456789.0, default), "1.2346e+8");
+        assert_eq!(format_real(99999.0, default), "99999.00");
+        assert_eq!(format_real(100000.0, default), "1.0000e+5");
+        assert_eq!(format_real(20.0, default), "20.00");
     }
 
     #[test]

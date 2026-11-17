@@ -537,7 +537,7 @@ fn e2e_formatacao_de_reais() {
   0;
 };"#;
     let (stdout, exit, _) = compile_and_run("formatacao", source);
-    assert_eq!(stdout, "0.50\n20.00\n1.00e-3\n20.0000\n");
+    assert_eq!(stdout, "0.50\n20.00\n1.0000e-3\n20.0000\n");
     assert_eq!(exit, 0);
 }
 

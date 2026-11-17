@@ -14,13 +14,9 @@
 //! * chamadas exigem alvo do tipo função, com argumento unificável;
 //! * `print`/`println`/`string`/`format` rejeitam valores de função (`render-function`).
 //!
-//! ## Limite conhecido
-//!
-//! Funções genéricas (sem anotação no parâmetro) recebem o tipo `Any` — um tipo "desconhecido"
-//! que unifica com qualquer outro sem gerar erro. Isso mantém programas como `identidade = fn(x){
-//! x; }; identidade(1); identidade("abc");` válidos (Seção 4.10 fala em especialização; aqui o
-//! caso genérico funciona, mas sem multiplicar instâncias). O mesmo vale para recursão, cujo tipo
-//! só é conhecido ao final do corpo. Está registrado no `RELATORIO_PROGRESSO.md`.
+//! Funções genéricas começam com parâmetro `Any` e são verificadas novamente nas chamadas
+//! com tipos concretos. O cache mantém o resultado de cada instância concluída; só a
+//! reentrada recursiva em uma instância ainda em andamento usa `Any`.
 
 use std::collections::HashMap;
 
@@ -30,7 +26,7 @@ use crate::lexer::Span;
 use crate::parser::ast::*;
 
 /// Tipo estático de uma expressão XPR.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Ty {
     Int,
     Real,
@@ -186,9 +182,9 @@ pub struct TypeChecker<'a> {
     /// `FnDef` de cada função genérica, por nome, para instanciar por tipo de argumento
     /// (Seção 4.10).
     generic_defs: HashMap<String, FnDef>,
-    /// Instâncias `(nome, tipo do argumento)` já verificadas — evita reprocessar chamadas
-    /// repetidas e impede loop infinito na instanciação de recursivas.
-    instances: std::collections::HashSet<(String, String)>,
+    /// Cache por nome, posição da definição e tipo estrutural do argumento.
+    /// `None` marca instâncias em andamento; `Some` conserva o resultado já inferido.
+    instances: HashMap<(String, u32, u32, Ty), Option<Ty>>,
 }
 
 /// O **valor de resultado** desta expressão depende de uma chamada à própria função sendo
@@ -239,7 +235,7 @@ impl<'a> TypeChecker<'a> {
             pending: Vec::new(),
             try_types: HashMap::new(),
             generic_defs: HashMap::new(),
-            instances: std::collections::HashSet::new(),
+            instances: HashMap::new(),
         }
     }
 
@@ -916,7 +912,7 @@ impl<'a> TypeChecker<'a> {
     ///
     /// Só atua quando o tipo do parâmetro é `Any` (genérico); anotações concretas já foram
     /// conferidas pela unificação do argumento. As instâncias verificadas são memorizadas por
-    /// `(nome, tipo)` — necessário para recursivas, que se instanciariam mutuamente sem fim.
+    /// nome, posição da definição e tipo estrutural — com estado em andamento para recursivas.
     fn instantiate(&mut self, name: &str, arg_ty: &Ty) -> Result<Option<Ty>, SemaError> {
         let fn_def = match self.generic_defs.get(name) {
             Some(def) => def.clone(),
@@ -930,22 +926,34 @@ impl<'a> TypeChecker<'a> {
             Ty::Any => return Ok(None),
             ty => ty.clone(),
         };
-        // Instância já verificada (ou em andamento): reusa o resultado da definição. Marcar
-        // **antes** de rechecar é o que impede a recursiva de se instanciar sem fim.
-        if !self
-            .instances
-            .insert((name.to_string(), concrete.name()))
-        {
-            return Ok(Some(Ty::Any));
+        let key = (
+            name.to_string(),
+            fn_def.span.line_start,
+            fn_def.span.col_start,
+            concrete.clone(),
+        );
+        // Só a reentrada recursiva ainda em andamento usa Any. Chamadas seguintes
+        // reutilizam o tipo de resultado concreto, sem perder a checagem de operadores.
+        if let Some(result) = self.instances.get(&key) {
+            return Ok(Some(result.clone().unwrap_or(Ty::Any)));
         }
+        self.instances.insert(key.clone(), None);
         self.scopes.push(HashMap::new());
         if let ParamPattern::Name { name: param, .. } = &fn_def.param {
             self.declare(param, concrete);
         }
         let result = self.check_block(&fn_def.body);
         self.scopes.pop();
-        let result_ty = result?;
-        Ok(Some(result_ty))
+        match result {
+            Ok(result_ty) => {
+                self.instances.insert(key, Some(result_ty.clone()));
+                Ok(Some(result_ty))
+            }
+            Err(error) => {
+                self.instances.remove(&key);
+                Err(error)
+            }
+        }
     }
 
     fn check_builtin(
@@ -1651,6 +1659,23 @@ mod tests {
         // `f(3)` na instância int tem tipo int: somar string é erro (antes era `Any`, passava).
         assert_eq!(
             check_err("_main = fn(a){ f = fn(x){ x; }; r = f(3); r + \"s\"; };"),
+            DiagCode::TypeMismatch
+        );
+    }
+
+    #[test]
+    fn generic_repetida_preserva_tipo_do_resultado() {
+        assert_eq!(
+            check_err("_main = fn(a){ f = fn(x){ x; }; f(1); f(1) - \"s\"; };"),
+            DiagCode::TypeMismatch
+        );
+        assert!(check("_main = fn(a){ f = fn(x){ x; }; f(1); f(1) - 2; };").is_ok());
+    }
+
+    #[test]
+    fn apply_repetido_preserva_tipo_do_resultado() {
+        assert_eq!(
+            check_err("_main = fn(a){ f = fn(x){ x; }; apply([[1], f]); apply([[1], f]) - [\"s\"]; };"),
             DiagCode::TypeMismatch
         );
     }
